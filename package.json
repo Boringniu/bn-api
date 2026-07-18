@@ -7,8 +7,10 @@
   "scripts": {
     "validate": "node scripts/validate-config.mjs",
     "check:aliases": "node scripts/check-duplicate-alias.mjs",
+    "test": "node --test",
+    "normalize:tags": "node scripts/normalize-tags.mjs",
     "build:manifest": "node scripts/build-config-manifest.mjs",
-    "check": "npm run validate && npm run check:aliases && npm run build:manifest"
+    "check": "npm run validate && npm run check:aliases && npm test && npm run build:manifest"
   },
   "engines": {
     "node": ">=20"

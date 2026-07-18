@@ -8,7 +8,10 @@ Boringniuniu 影视库的唯一规则配置中心。分类、标签、演员名�
 | --- | --- |
 | `config/` | 实际生效的 JSON 配置 |
 | `schema/` | 与配置文件一一对应的 JSON Schema |
-| `scripts/` | 结构校验、别名冲突检查和 manifest 构建 |
+| `contracts/` | 下游运行时结果的 JSON Schema |
+| `src/` | 配置驱动的运行时规则实现 |
+| `scripts/` | 结构校验、规则执行和 manifest 构建 |
+| `test/` | 运行时规则和输出契约测试 |
 | `dist/config-manifest.json` | `npm run build:manifest` 生成的消费清单，不提交 Git |
 
 ## 本地检查
@@ -24,7 +27,26 @@ npm run check
 
 1. `npm run validate`：校验 JSON Schema、ID 唯一性、规范化值、版本声明、跨配置上限和正则表达式。
 2. `npm run check:aliases`：检查别名重复、一个别名指向多个目标、忽略词冲突和全局别名目标引用。
-3. `npm run build:manifest`：生成包含版本、文件大小和 SHA-256 的 `dist/config-manifest.json`。
+3. `npm test`：验证标签规范化行为及其输出契约。
+4. `npm run build:manifest`：生成包含版本、文件大小和 SHA-256 的 `dist/config-manifest.json`。
+
+## 标签规范化
+
+标签规范化器只使用状态为 `approved` 的分类、标签、全局别名和忽略词。未知标签和无法确定的分类进入 `review_rules.json` 定义的审核流程，不会自动创建字典项。
+
+命令行参数会被逐项视为原始标签：
+
+```bash
+npm run normalize:tags -- 日本成人 CHS 电影 未知流派
+```
+
+也可以从标准输入传入 JSON 数组或带有 `raw_tags` 的对象：
+
+```bash
+printf '%s\n' '{"raw_tags":["日本成人","CHS","电影"]}' | npm run normalize:tags
+```
+
+结果包含选定分类、全部分类候选、标准标签、展示标签、忽略项、审核项、逐输入决策和规则违规。完整结构由 `contracts/tag-normalization-result.schema.json` 定义。
 
 ## 修改规则
 

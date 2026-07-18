@@ -260,6 +260,17 @@ function checkRegularExpressions() {
     }
   }
 
+  for (const [index, ignored] of (
+    configs.get("ignored")?.data.items ?? []
+  ).entries()) {
+    if (ignored.match_mode === "regex") {
+      patterns.push([
+        `config/ignored.json/items/${index}/value`,
+        ignored.value,
+      ]);
+    }
+  }
+
   for (const [path, pattern] of patterns) {
     try {
       new RegExp(pattern, "u");

@@ -2,6 +2,8 @@ import { readFile, readdir } from "node:fs/promises";
 import { basename, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+export { normalizeValue as normalizeAlias } from "../../src/value-normalizer.mjs";
+
 export const ROOT_DIR = fileURLToPath(new URL("../..", import.meta.url));
 export const CONFIG_DIR = fileURLToPath(new URL("../../config", import.meta.url));
 export const SCHEMA_DIR = fileURLToPath(new URL("../../schema", import.meta.url));
@@ -42,14 +44,6 @@ export async function loadJsonDirectory(directory) {
   );
 
   return new Map(entries);
-}
-
-export function normalizeAlias(value) {
-  return value
-    .normalize("NFKC")
-    .trim()
-    .replace(/\s+/gu, " ")
-    .toLocaleLowerCase("en-US");
 }
 
 export function relativePath(filePath) {
