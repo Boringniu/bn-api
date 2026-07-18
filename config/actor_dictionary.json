@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.0.0",
-  "updated_at": "2026-07-18T00:00:00Z",
+  "config_version": "1.1.0",
+  "updated_at": "2026-07-18T18:04:37Z",
   "updated_by": "admin",
   "items": [
     {
@@ -45,7 +45,950 @@
       ],
       "notes": "标准中文简体名称为“希岛爱理”",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000002",
+      "display_name_zh_cn": "波多野结衣",
+      "name_ja": "波多野结衣",
+      "name_en": "Yui Hatano",
+      "romanized_name": "Hatano Yui",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "波多野结衣",
+          "normalized_value": "波多野结衣",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Yui Hatano",
+          "normalized_value": "yui hatano",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Hatano Yui",
+          "normalized_value": "hatano yui",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“波多野结衣”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000003",
+      "display_name_zh_cn": "三上悠亚",
+      "name_ja": "三上悠亜",
+      "name_en": "Yua Mikami",
+      "romanized_name": "Mikami Yua",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "三上悠亚",
+          "normalized_value": "三上悠亚",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "三上悠亜",
+          "normalized_value": "三上悠亜",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Yua Mikami",
+          "normalized_value": "yua mikami",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Mikami Yua",
+          "normalized_value": "mikami yua",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“三上悠亚”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000004",
+      "display_name_zh_cn": "河北彩花",
+      "name_ja": "河北彩花",
+      "name_en": "Saika Kawakita",
+      "romanized_name": "Kawakita Saika",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "河北彩花",
+          "normalized_value": "河北彩花",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Kawakita Saika",
+          "normalized_value": "kawakita saika",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Saika Kawakita",
+          "normalized_value": "saika kawakita",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“河北彩花”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000005",
+      "display_name_zh_cn": "桥本有菜",
+      "name_ja": "橋本ありな",
+      "name_en": "Arina Hashimoto",
+      "romanized_name": "Hashimoto Arina",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "桥本有菜",
+          "normalized_value": "桥本有菜",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "橋本ありな",
+          "normalized_value": "橋本ありな",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Arina Hashimoto",
+          "normalized_value": "arina hashimoto",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Hashimoto Arina",
+          "normalized_value": "hashimoto arina",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“桥本有菜”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000006",
+      "display_name_zh_cn": "明日花绮罗",
+      "name_ja": "明日花キララ",
+      "name_en": "Kirara Asuka",
+      "romanized_name": "Asuka Kirara",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "明日花绮罗",
+          "normalized_value": "明日花绮罗",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "明日花キララ",
+          "normalized_value": "明日花キララ",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Kirara Asuka",
+          "normalized_value": "kirara asuka",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Asuka Kirara",
+          "normalized_value": "asuka kirara",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“明日花绮罗”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000007",
+      "display_name_zh_cn": "葵司",
+      "name_ja": "葵つかさ",
+      "name_en": "Tsukasa Aoi",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "葵司",
+          "normalized_value": "葵司",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "葵つかさ",
+          "normalized_value": "葵つかさ",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Tsukasa Aoi",
+          "normalized_value": "tsukasa aoi",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“葵司”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000008",
+      "display_name_zh_cn": "深田咏美",
+      "name_ja": "深田えいみ",
+      "name_en": "Eimi Fukada",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "深田咏美",
+          "normalized_value": "深田咏美",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "深田えいみ",
+          "normalized_value": "深田えいみ",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Eimi Fukada",
+          "normalized_value": "eimi fukada",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“深田咏美”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000009",
+      "display_name_zh_cn": "桃乃木香奈",
+      "name_ja": "桃乃木かな",
+      "name_en": "Kana Momonogi",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "桃乃木香奈",
+          "normalized_value": "桃乃木香奈",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "桃乃木かな",
+          "normalized_value": "桃乃木かな",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Kana Momonogi",
+          "normalized_value": "kana momonogi",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“桃乃木香奈”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000010",
+      "display_name_zh_cn": "天使萌",
+      "name_ja": "天使もえ",
+      "name_en": "Moe Amatsuka",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "天使萌",
+          "normalized_value": "天使萌",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "天使もえ",
+          "normalized_value": "天使もえ",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Moe Amatsuka",
+          "normalized_value": "moe amatsuka",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“天使萌”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000011",
+      "display_name_zh_cn": "相泽南",
+      "name_ja": "相沢みなみ",
+      "name_en": "Minami Aizawa",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "相泽南",
+          "normalized_value": "相泽南",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "相沢みなみ",
+          "normalized_value": "相沢みなみ",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Minami Aizawa",
+          "normalized_value": "minami aizawa",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“相泽南”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000012",
+      "display_name_zh_cn": "本乡爱",
+      "name_ja": "本郷愛",
+      "name_en": "Ai Hongo",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "本乡爱",
+          "normalized_value": "本乡爱",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "本郷愛",
+          "normalized_value": "本郷愛",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Ai Hongo",
+          "normalized_value": "ai hongo",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“本乡爱”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000013",
+      "display_name_zh_cn": "小野六花",
+      "name_ja": "小野六花",
+      "name_en": "Rikka Ono",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "小野六花",
+          "normalized_value": "小野六花",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Rikka Ono",
+          "normalized_value": "rikka ono",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“小野六花”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000014",
+      "display_name_zh_cn": "樱空桃",
+      "name_ja": "桜空もも",
+      "name_en": "Momo Sakura",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "樱空桃",
+          "normalized_value": "樱空桃",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "桜空もも",
+          "normalized_value": "桜空もも",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Momo Sakura",
+          "normalized_value": "momo sakura",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“樱空桃”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000015",
+      "display_name_zh_cn": "美谷朱里",
+      "name_ja": "美谷朱里",
+      "name_en": "Akari Mitani",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "美谷朱里",
+          "normalized_value": "美谷朱里",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Akari Mitani",
+          "normalized_value": "akari mitani",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“美谷朱里”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000016",
+      "display_name_zh_cn": "神宫寺奈绪",
+      "name_ja": "神宮寺ナオ",
+      "name_en": "Nao Jinguji",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "神宫寺奈绪",
+          "normalized_value": "神宫寺奈绪",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "神宮寺ナオ",
+          "normalized_value": "神宮寺ナオ",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Nao Jinguji",
+          "normalized_value": "nao jinguji",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“神宫寺奈绪”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000017",
+      "display_name_zh_cn": "山手梨爱",
+      "name_ja": "山手梨愛",
+      "name_en": "Ria Yamate",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "山手梨爱",
+          "normalized_value": "山手梨爱",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "山手梨愛",
+          "normalized_value": "山手梨愛",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Ria Yamate",
+          "normalized_value": "ria yamate",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“山手梨爱”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000018",
+      "display_name_zh_cn": "八木奈奈",
+      "name_ja": "八木奈々",
+      "name_en": "Nana Yagi",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "八木奈奈",
+          "normalized_value": "八木奈奈",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "八木奈々",
+          "normalized_value": "八木奈々",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Nana Yagi",
+          "normalized_value": "nana yagi",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“八木奈奈”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000019",
+      "display_name_zh_cn": "伊藤舞雪",
+      "name_ja": "伊藤舞雪",
+      "name_en": "Maiyuki Ito",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "伊藤舞雪",
+          "normalized_value": "伊藤舞雪",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Maiyuki Ito",
+          "normalized_value": "maiyuki ito",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“伊藤舞雪”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000020",
+      "display_name_zh_cn": "七泽米亚",
+      "name_ja": "七沢みあ",
+      "name_en": "Mia Nanazawa",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "七泽米亚",
+          "normalized_value": "七泽米亚",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "七沢みあ",
+          "normalized_value": "七沢みあ",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Mia Nanazawa",
+          "normalized_value": "mia nanazawa",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“七泽米亚”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000021",
+      "display_name_zh_cn": "松下纱荣子",
+      "name_ja": "松下紗栄子",
+      "name_en": "Saeko Matsushita",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "松下纱荣子",
+          "normalized_value": "松下纱荣子",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "松下紗栄子",
+          "normalized_value": "松下紗栄子",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Saeko Matsushita",
+          "normalized_value": "saeko matsushita",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“松下纱荣子”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000022",
+      "display_name_zh_cn": "叶山小百合",
+      "name_ja": "葉山さゆり",
+      "name_en": "Sayuri Hayama",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "叶山小百合",
+          "normalized_value": "叶山小百合",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "葉山さゆり",
+          "normalized_value": "葉山さゆり",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Sayuri Hayama",
+          "normalized_value": "sayuri hayama",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“叶山小百合”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000023",
+      "display_name_zh_cn": "三宫椿",
+      "name_ja": "三宮つばき",
+      "name_en": "Tsubaki Sannomiya",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "三宫椿",
+          "normalized_value": "三宫椿",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "三宮つばき",
+          "normalized_value": "三宮つばき",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Tsubaki Sannomiya",
+          "normalized_value": "tsubaki sannomiya",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“三宫椿”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000024",
+      "display_name_zh_cn": "森泽佳奈",
+      "name_ja": "森澤かな",
+      "name_en": "Kana Morisawa",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "森泽佳奈",
+          "normalized_value": "森泽佳奈",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "森澤かな",
+          "normalized_value": "森澤かな",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "森澤佳奈",
+          "normalized_value": "森澤佳奈",
+          "language": "zh-TW",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Kana Morisawa",
+          "normalized_value": "kana morisawa",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“森泽佳奈”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000025",
+      "display_name_zh_cn": "橘玛丽",
+      "name_ja": "橘メアリー",
+      "name_en": "Mary Tachibana",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "橘玛丽",
+          "normalized_value": "橘玛丽",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "橘メアリー",
+          "normalized_value": "橘メアリー",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Mary Tachibana",
+          "normalized_value": "mary tachibana",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“橘玛丽”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000026",
+      "display_name_zh_cn": "大槻响",
+      "name_ja": "大槻ひびき",
+      "name_en": "Hibiki Otsuki",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "大槻响",
+          "normalized_value": "大槻响",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "大槻ひびき",
+          "normalized_value": "大槻ひびき",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Hibiki Otsuki",
+          "normalized_value": "hibiki otsuki",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“大槻响”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "actor_id": "actor_000027",
+      "display_name_zh_cn": "枫可怜",
+      "name_ja": "楓カレン",
+      "name_en": "Karen Kaede",
+      "romanized_name": null,
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "枫可怜",
+          "normalized_value": "枫可怜",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "楓カレン",
+          "normalized_value": "楓カレン",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Karen Kaede",
+          "normalized_value": "karen kaede",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“枫可怜”",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
     }
   ],
   "rules": {

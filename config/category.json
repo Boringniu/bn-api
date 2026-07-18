@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.0.0",
-  "updated_at": "2026-07-18T00:00:00Z",
+  "config_version": "1.1.0",
+  "updated_at": "2026-07-18T18:04:37Z",
   "updated_by": "admin",
   "items": [
     {
@@ -41,6 +41,7 @@
       "aliases": [
         "欧美",
         "欧美系",
+        "美国",
         "western",
         "europe",
         "usa",
@@ -50,6 +51,7 @@
       "normalized_aliases": [
         "欧美",
         "欧美系",
+        "美国",
         "western",
         "europe",
         "usa",
@@ -70,7 +72,6 @@
         "国产",
         "中国",
         "china",
-        "chinese",
         "cn",
         "大陆"
       ],
@@ -78,7 +79,6 @@
         "国产",
         "中国",
         "china",
-        "chinese",
         "cn",
         "大陆"
       ],
@@ -95,20 +95,28 @@
       "aliases": [
         "自拍",
         "私拍",
+        "素人",
+        "个人拍摄",
+        "自摄",
         "自撮り",
         "selfshot",
-        "self shot"
+        "self shot",
+        "Selfie"
       ],
       "normalized_aliases": [
         "自拍",
         "私拍",
+        "素人",
+        "个人拍摄",
+        "自摄",
         "自撮り",
         "selfshot",
-        "self shot"
+        "self shot",
+        "selfie"
       ],
       "description": "自拍或私拍类内容",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     },
     {
       "category_id": "cat_ai_drama",
@@ -117,22 +125,26 @@
       "status": "approved",
       "priority": 60,
       "aliases": [
+        "AI",
         "ai短剧",
         "ai生成",
         "aigc",
         "ai剧",
+        "人工智能",
         "人工智能短剧"
       ],
       "normalized_aliases": [
+        "ai",
         "ai短剧",
         "ai生成",
         "aigc",
         "ai剧",
+        "人工智能",
         "人工智能短剧"
       ],
       "description": "AI 生成的短剧类内容",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     }
   ],
   "classification_rules": {

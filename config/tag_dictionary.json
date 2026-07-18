@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.0.0",
-  "updated_at": "2026-07-18T00:00:00Z",
+  "config_version": "1.1.0",
+  "updated_at": "2026-07-18T18:04:37Z",
   "updated_by": "admin",
   "items": [
     {
@@ -21,7 +21,8 @@
         "cht",
         "简中",
         "繁中",
-        "中文配音"
+        "中文配音",
+        "Chinese"
       ],
       "normalized_aliases": [
         "中字",
@@ -31,11 +32,12 @@
         "cht",
         "简中",
         "繁中",
-        "中文配音"
+        "中文配音",
+        "chinese"
       ],
       "description": "带有中文字幕或中文语言支持的内容",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     },
     {
       "tag_id": "tag_ntr",
@@ -51,18 +53,20 @@
         "寝取られ",
         "寝取",
         "绿帽",
-        "绿帽题材"
+        "绿帽题材",
+        "牛头人"
       ],
       "normalized_aliases": [
         "ntr",
         "寝取られ",
         "寝取",
         "绿帽",
-        "绿帽题材"
+        "绿帽题材",
+        "牛头人"
       ],
       "description": "NTR 题材",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     },
     {
       "tag_id": "tag_wife",
@@ -78,18 +82,24 @@
         "人妻系",
         "已婚女性",
         "已婚女人",
-        "主妇"
+        "主妇",
+        "熟女人妻",
+        "已婚",
+        "熟女"
       ],
       "normalized_aliases": [
         "人妻",
         "人妻系",
         "已婚女性",
         "已婚女人",
-        "主妇"
+        "主妇",
+        "熟女人妻",
+        "已婚",
+        "熟女"
       ],
       "description": "人妻题材",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     },
     {
       "tag_id": "tag_female_teacher",
@@ -102,21 +112,25 @@
       "category": "role",
       "aliases": [
         "女教师",
+        "女教師",
         "女老师",
         "教师",
+        "教師",
         "老师",
         "teacher"
       ],
       "normalized_aliases": [
         "女教师",
+        "女教師",
         "女老师",
         "教师",
+        "教師",
         "老师",
         "teacher"
       ],
       "description": "女教师角色题材",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     },
     {
       "tag_id": "tag_nurse",
@@ -131,17 +145,19 @@
         "护士",
         "护理师",
         "看护",
+        "看護師",
         "nurse"
       ],
       "normalized_aliases": [
         "护士",
         "护理师",
         "看护",
+        "看護師",
         "nurse"
       ],
       "description": "护士角色题材",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     },
     {
       "tag_id": "tag_student",
@@ -207,16 +223,20 @@
       "aliases": [
         "制服",
         "制服诱惑",
-        "制服系"
+        "制服系",
+        "校服",
+        "职业制服"
       ],
       "normalized_aliases": [
         "制服",
         "制服诱惑",
-        "制服系"
+        "制服系",
+        "校服",
+        "职业制服"
       ],
       "description": "制服题材",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     },
     {
       "tag_id": "tag_story",
@@ -229,19 +249,25 @@
       "category": "format",
       "aliases": [
         "剧情",
+        "劇情",
         "故事",
         "剧情向",
-        "情节"
+        "情节",
+        "Story",
+        "Drama"
       ],
       "normalized_aliases": [
         "剧情",
+        "劇情",
         "故事",
         "剧情向",
-        "情节"
+        "情节",
+        "story",
+        "drama"
       ],
       "description": "有明确剧情或故事设定",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
     },
     {
       "tag_id": "tag_office",
@@ -254,6 +280,7 @@
       "category": "scene",
       "aliases": [
         "办公室",
+        "办公室OL",
         "职场",
         "公司",
         "ol",
@@ -261,6 +288,7 @@
       ],
       "normalized_aliases": [
         "办公室",
+        "办公室ol",
         "职场",
         "公司",
         "ol",
@@ -268,7 +296,78 @@
       ],
       "description": "办公室或职场场景",
       "created_at": "2026-07-18T00:00:00Z",
-      "updated_at": "2026-07-18T00:00:00Z"
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "tag_id": "tag_uncensored",
+      "display_name": "无码",
+      "slug": "uncensored",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 95,
+      "category": "format",
+      "aliases": [
+        "无码",
+        "無碼",
+        "无修正",
+        "Uncensored"
+      ],
+      "normalized_aliases": [
+        "无码",
+        "無碼",
+        "无修正",
+        "uncensored"
+      ],
+      "description": "无码或无修正内容",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "tag_id": "tag_censored",
+      "display_name": "有码",
+      "slug": "censored",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 95,
+      "category": "format",
+      "aliases": [
+        "有码",
+        "有碼",
+        "Censored"
+      ],
+      "normalized_aliases": [
+        "有码",
+        "有碼",
+        "censored"
+      ],
+      "description": "有码内容",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "tag_id": "tag_big_bust",
+      "display_name": "巨乳",
+      "slug": "big-bust",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 85,
+      "category": "theme",
+      "aliases": [
+        "巨乳",
+        "爆乳",
+        "Big Bust"
+      ],
+      "normalized_aliases": [
+        "巨乳",
+        "爆乳",
+        "big bust"
+      ],
+      "description": "巨乳题材",
+      "created_at": "2026-07-18T18:04:37Z",
+      "updated_at": "2026-07-18T18:04:37Z"
     }
   ],
   "rules": {

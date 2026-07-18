@@ -1,13 +1,13 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.0.0",
-  "updated_at": "2026-07-18T00:00:00Z",
+  "config_version": "1.1.0",
+  "updated_at": "2026-07-18T18:04:37Z",
   "updated_by": "admin",
   "items": [],
   "release": {
-    "version": "1.0.0",
+    "version": "1.1.0",
     "release_date": "2026-07-18",
-    "description": "初始规则配置版本"
+    "description": "扩充演员、分类别名和标签字典"
   },
   "compatibility": {
     "minimum_worker_version": "1.0.0",
@@ -15,9 +15,9 @@
     "minimum_database_schema_version": "1.0.0"
   },
   "files": {
-    "category": "1.0.0",
-    "tag_dictionary": "1.0.0",
-    "actor_dictionary": "1.0.0",
+    "category": "1.1.0",
+    "tag_dictionary": "1.1.0",
+    "actor_dictionary": "1.1.0",
     "alias": "1.0.0",
     "ignored": "1.0.0",
     "display": "1.0.0",
