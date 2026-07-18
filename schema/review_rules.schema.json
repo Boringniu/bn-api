@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boringniu.example/schema/review_rules.schema.json",
+  "title": "Boringniu review rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "updated_at",
+    "updated_by",
+    "items",
+    "review_types",
+    "confidence_thresholds",
+    "review_actions",
+    "github_sync"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "config_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "updated_at": {
+      "$ref": "#/$defs/utcDateTime"
+    },
+    "updated_by": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "review_types": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "enabled",
+          "description",
+          "auto_create_when",
+          "default_status",
+          "allow_ai_suggestion",
+          "allow_auto_approve",
+          "required_reviewer_role"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "pending_tag",
+              "pending_actor",
+              "pending_alias",
+              "pending_category",
+              "possible_duplicate",
+              "possible_code"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "description": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "auto_create_when": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "default_status": {
+            "const": "pending"
+          },
+          "allow_ai_suggestion": {
+            "const": true
+          },
+          "allow_auto_approve": {
+            "const": false
+          },
+          "required_reviewer_role": {
+            "enum": [
+              "editor",
+              "admin"
+            ]
+          }
+        }
+      }
+    },
+    "confidence_thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auto_match_tag",
+        "auto_match_actor",
+        "possible_duplicate",
+        "possible_code"
+      ],
+      "properties": {
+        "auto_match_tag": {
+          "$ref": "#/$defs/confidence"
+        },
+        "auto_match_actor": {
+          "$ref": "#/$defs/confidence"
+        },
+        "possible_duplicate": {
+          "$ref": "#/$defs/confidence"
+        },
+        "possible_code": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "review_actions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "approve",
+          "reject",
+          "ignore",
+          "merge",
+          "deprecate",
+          "edit",
+          "link_existing"
+        ]
+      }
+    },
+    "github_sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "require_pull_request",
+        "require_ci_pass",
+        "direct_push_to_main",
+        "reindex_after_merge"
+      ],
+      "properties": {
+        "enabled": {
+          "const": true
+        },
+        "require_pull_request": {
+          "const": true
+        },
+        "require_ci_pass": {
+          "const": true
+        },
+        "direct_push_to_main": {
+          "const": false
+        },
+        "reindex_after_merge": {
+          "const": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "utcDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

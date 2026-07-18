@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "config_version": "1.0.0",
+  "updated_at": "2026-07-18T00:00:00Z",
+  "updated_by": "admin",
+  "items": [
+    {
+      "alias_id": "alias_000001",
+      "alias_type": "actor",
+      "raw_value": "希島愛理",
+      "normalized_value": "希島愛理",
+      "target_type": "actor",
+      "target_id": "actor_000001",
+      "target_display_name": "希岛爱理",
+      "status": "approved",
+      "match_mode": "exact",
+      "source": "manual",
+      "notes": "繁体写法兼容",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "alias_id": "alias_000002",
+      "alias_type": "tag",
+      "raw_value": "office lady",
+      "normalized_value": "office lady",
+      "target_type": "tag",
+      "target_id": "tag_office",
+      "target_display_name": "办公室",
+      "status": "approved",
+      "match_mode": "exact",
+      "source": "manual",
+      "notes": "英文场景别名",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "alias_id": "alias_000003",
+      "alias_type": "code_format",
+      "raw_value": "abp123",
+      "normalized_value": "abp123",
+      "target_type": "code_pattern",
+      "target_id": "code_standard_hyphen",
+      "target_display_name": "ABP-123",
+      "status": "approved",
+      "match_mode": "normalize",
+      "source": "system",
+      "notes": "番号格式归一化示例",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    }
+  ],
+  "rules": {
+    "allow_duplicate_alias_across_same_target": false,
+    "allow_alias_point_to_multiple_targets": false,
+    "default_match_mode": "exact",
+    "enabled_types": [
+      "actor",
+      "tag",
+      "category",
+      "code_format",
+      "search_correction"
+    ]
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "config_version": "1.0.0",
+  "updated_at": "2026-07-18T00:00:00Z",
+  "updated_by": "admin",
+  "items": [],
+  "review_types": [
+    {
+      "type": "pending_tag",
+      "enabled": true,
+      "description": "未知原始标签",
+      "auto_create_when": "tag_not_found_in_dictionary",
+      "default_status": "pending",
+      "allow_ai_suggestion": true,
+      "allow_auto_approve": false,
+      "required_reviewer_role": "editor"
+    },
+    {
+      "type": "pending_actor",
+      "enabled": true,
+      "description": "未知演员名称",
+      "auto_create_when": "actor_not_found_in_dictionary",
+      "default_status": "pending",
+      "allow_ai_suggestion": true,
+      "allow_auto_approve": false,
+      "required_reviewer_role": "editor"
+    },
+    {
+      "type": "pending_alias",
+      "enabled": true,
+      "description": "未知别名或疑似别名",
+      "auto_create_when": "alias_candidate_detected",
+      "default_status": "pending",
+      "allow_ai_suggestion": true,
+      "allow_auto_approve": false,
+      "required_reviewer_role": "editor"
+    },
+    {
+      "type": "pending_category",
+      "enabled": true,
+      "description": "无法归入固定一级分类",
+      "auto_create_when": "category_not_resolved",
+      "default_status": "pending",
+      "allow_ai_suggestion": true,
+      "allow_auto_approve": false,
+      "required_reviewer_role": "admin"
+    },
+    {
+      "type": "possible_duplicate",
+      "enabled": true,
+      "description": "疑似重复视频或同番号多版本",
+      "auto_create_when": "duplicate_score_above_threshold",
+      "default_status": "pending",
+      "allow_ai_suggestion": true,
+      "allow_auto_approve": false,
+      "required_reviewer_role": "editor"
+    },
+    {
+      "type": "possible_code",
+      "enabled": true,
+      "description": "疑似番号但无法确认格式",
+      "auto_create_when": "code_confidence_below_threshold",
+      "default_status": "pending",
+      "allow_ai_suggestion": true,
+      "allow_auto_approve": false,
+      "required_reviewer_role": "editor"
+    }
+  ],
+  "confidence_thresholds": {
+    "auto_match_tag": 0.9,
+    "auto_match_actor": 0.95,
+    "possible_duplicate": 0.85,
+    "possible_code": 0.7
+  },
+  "review_actions": [
+    "approve",
+    "reject",
+    "ignore",
+    "merge",
+    "deprecate",
+    "edit",
+    "link_existing"
+  ],
+  "github_sync": {
+    "enabled": true,
+    "require_pull_request": true,
+    "require_ci_pass": true,
+    "direct_push_to_main": false,
+    "reindex_after_merge": true
+  }
+}

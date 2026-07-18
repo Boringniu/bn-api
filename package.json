@@ -1,0 +1,20 @@
+{
+  "name": "boringniu-media-config",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Boringniu 影视库的唯一规则配置中心",
+  "scripts": {
+    "validate": "node scripts/validate-config.mjs",
+    "check:aliases": "node scripts/check-duplicate-alias.mjs",
+    "build:manifest": "node scripts/build-config-manifest.mjs",
+    "check": "npm run validate && npm run check:aliases && npm run build:manifest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  }
+}

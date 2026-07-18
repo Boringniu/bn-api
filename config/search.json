@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0",
+  "config_version": "1.0.0",
+  "updated_at": "2026-07-18T00:00:00Z",
+  "updated_by": "admin",
+  "items": [],
+  "search": {
+    "default_page_size": 10,
+    "max_page_size": 20,
+    "max_result_count": 200,
+    "query_min_length": 1,
+    "enable_suggestions": true,
+    "enable_fuzzy_search": true,
+    "fuzzy_search_min_length": 3,
+    "fuzzy_search_max_distance": 2,
+    "search_order": [
+      "exact_code",
+      "exact_actor_alias",
+      "exact_tag_alias",
+      "exact_category_alias",
+      "normalized_match",
+      "prefix_match",
+      "fuzzy_match"
+    ]
+  },
+  "actor_search": {
+    "enabled": true,
+    "search_fields": [
+      "display_name_zh_cn",
+      "name_ja",
+      "name_en",
+      "romanized_name",
+      "aliases"
+    ],
+    "approved_only": true,
+    "allow_partial_match": true,
+    "allow_fuzzy_match": true,
+    "sort_by": [
+      "video_count_desc",
+      "display_name_asc"
+    ]
+  },
+  "tag_search": {
+    "enabled": true,
+    "search_fields": [
+      "display_name",
+      "aliases"
+    ],
+    "approved_only": true,
+    "allow_partial_match": true,
+    "allow_fuzzy_match": true,
+    "sort_by": [
+      "weight_desc",
+      "video_count_desc",
+      "display_name_asc"
+    ]
+  },
+  "category_search": {
+    "enabled": true,
+    "approved_only": true,
+    "allow_partial_match": false
+  },
+  "code_search": {
+    "enabled": true,
+    "exact_match_first": true,
+    "allow_prefix_search": true,
+    "allow_fuzzy_match": false,
+    "normalization": {
+      "uppercase": true,
+      "remove_spaces": true,
+      "remove_underscores": true,
+      "normalize_hyphen": true,
+      "pattern": "^([A-Z]{2,10})[- ]?(\\d{2,6})$",
+      "output_format": "$1-$2"
+    },
+    "alphabetical_grouping": {
+      "enabled": true,
+      "group_by": "prefix",
+      "sort": "asc"
+    }
+  },
+  "combined_search": {
+    "enabled": true,
+    "supported_filters": [
+      "category_id",
+      "actor_id",
+      "tag_id",
+      "code",
+      "subtitle",
+      "year"
+    ],
+    "default_operator_between_filters": "AND",
+    "max_filters": 5
+  },
+  "access_control": {
+    "public_search_approved_only": true,
+    "allow_pending_for_admin": true,
+    "allow_raw_metadata_for_admin": true,
+    "allow_source_link_for_authorized_users_only": true
+  }
+}

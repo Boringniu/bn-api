@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "config_version": "1.0.0",
+  "updated_at": "2026-07-18T00:00:00Z",
+  "updated_by": "admin",
+  "items": [],
+  "channel_index": {
+    "enabled": true,
+    "title": "🎬影视库索引",
+    "show_category": true,
+    "show_actors": true,
+    "show_tags": true,
+    "show_code": false,
+    "show_year": false,
+    "show_quality": false,
+    "show_subtitle_field": false,
+    "show_language": false,
+    "show_file_format": false,
+    "show_raw_title": false,
+    "show_raw_tags": false,
+    "show_internal_id": false,
+    "category_label": "📂分类",
+    "actors_label": "👤演员",
+    "tags_label": "🏷类型",
+    "category_prefix": "#",
+    "actor_prefix": "#",
+    "tag_prefix": "#",
+    "max_actors": 5,
+    "max_tags": 8,
+    "hide_empty_category_block": false,
+    "hide_empty_actor_block": true,
+    "hide_empty_tag_block": true,
+    "actor_sort": [
+      "manual_order",
+      "display_name_asc"
+    ],
+    "tag_sort": [
+      "weight_desc",
+      "display_name_asc"
+    ],
+    "template": "🎬影视库索引\n\n📂分类\n{{category_tags}}\n\n👤演员\n{{actor_tags}}\n\n🏷类型\n{{type_tags}}"
+  },
+  "bot_result": {
+    "show_category": true,
+    "show_actors": true,
+    "show_tags": true,
+    "show_code": true,
+    "show_year": false,
+    "show_quality": false,
+    "show_language": false,
+    "show_raw_title": false,
+    "max_actors": 5,
+    "max_tags": 8,
+    "page_size": 10,
+    "show_source_link": true,
+    "show_video_count": true,
+    "show_result_number": true
+  },
+  "hashtag_rules": {
+    "enabled": true,
+    "remove_spaces": true,
+    "replace_characters": {
+      "-": "_",
+      "/": "_",
+      ".": "_",
+      "(": "",
+      ")": "",
+      "（": "",
+      "）": ""
+    },
+    "max_length": 64,
+    "on_invalid_hashtag": "skip_and_log"
+  }
+}

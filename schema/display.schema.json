@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boringniu.example/schema/display.schema.json",
+  "title": "Boringniu display configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "updated_at",
+    "updated_by",
+    "items",
+    "channel_index",
+    "bot_result",
+    "hashtag_rules"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "config_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "updated_at": {
+      "$ref": "#/$defs/utcDateTime"
+    },
+    "updated_by": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "channel_index": {
+      "$ref": "#/$defs/channelIndex"
+    },
+    "bot_result": {
+      "$ref": "#/$defs/botResult"
+    },
+    "hashtag_rules": {
+      "$ref": "#/$defs/hashtagRules"
+    }
+  },
+  "$defs": {
+    "channelIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "title",
+        "show_category",
+        "show_actors",
+        "show_tags",
+        "show_code",
+        "show_year",
+        "show_quality",
+        "show_subtitle_field",
+        "show_language",
+        "show_file_format",
+        "show_raw_title",
+        "show_raw_tags",
+        "show_internal_id",
+        "category_label",
+        "actors_label",
+        "tags_label",
+        "category_prefix",
+        "actor_prefix",
+        "tag_prefix",
+        "max_actors",
+        "max_tags",
+        "hide_empty_category_block",
+        "hide_empty_actor_block",
+        "hide_empty_tag_block",
+        "actor_sort",
+        "tag_sort",
+        "template"
+      ],
+      "properties": {
+        "enabled": {
+          "const": true
+        },
+        "title": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "show_category": {
+          "const": true
+        },
+        "show_actors": {
+          "const": true
+        },
+        "show_tags": {
+          "const": true
+        },
+        "show_code": {
+          "const": false
+        },
+        "show_year": {
+          "const": false
+        },
+        "show_quality": {
+          "const": false
+        },
+        "show_subtitle_field": {
+          "const": false
+        },
+        "show_language": {
+          "const": false
+        },
+        "show_file_format": {
+          "const": false
+        },
+        "show_raw_title": {
+          "const": false
+        },
+        "show_raw_tags": {
+          "const": false
+        },
+        "show_internal_id": {
+          "const": false
+        },
+        "category_label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "actors_label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "tags_label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "category_prefix": {
+          "const": "#"
+        },
+        "actor_prefix": {
+          "const": "#"
+        },
+        "tag_prefix": {
+          "const": "#"
+        },
+        "max_actors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "max_tags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "hide_empty_category_block": {
+          "type": "boolean"
+        },
+        "hide_empty_actor_block": {
+          "type": "boolean"
+        },
+        "hide_empty_tag_block": {
+          "type": "boolean"
+        },
+        "actor_sort": {
+          "const": [
+            "manual_order",
+            "display_name_asc"
+          ]
+        },
+        "tag_sort": {
+          "const": [
+            "weight_desc",
+            "display_name_asc"
+          ]
+        },
+        "template": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "\\{\\{category_tags\\}\\}"
+            },
+            {
+              "pattern": "\\{\\{actor_tags\\}\\}"
+            },
+            {
+              "pattern": "\\{\\{type_tags\\}\\}"
+            }
+          ]
+        }
+      }
+    },
+    "botResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "show_category",
+        "show_actors",
+        "show_tags",
+        "show_code",
+        "show_year",
+        "show_quality",
+        "show_language",
+        "show_raw_title",
+        "max_actors",
+        "max_tags",
+        "page_size",
+        "show_source_link",
+        "show_video_count",
+        "show_result_number"
+      ],
+      "properties": {
+        "show_category": {
+          "type": "boolean"
+        },
+        "show_actors": {
+          "type": "boolean"
+        },
+        "show_tags": {
+          "type": "boolean"
+        },
+        "show_code": {
+          "type": "boolean"
+        },
+        "show_year": {
+          "type": "boolean"
+        },
+        "show_quality": {
+          "type": "boolean"
+        },
+        "show_language": {
+          "type": "boolean"
+        },
+        "show_raw_title": {
+          "type": "boolean"
+        },
+        "max_actors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "max_tags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "page_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "show_source_link": {
+          "type": "boolean"
+        },
+        "show_video_count": {
+          "type": "boolean"
+        },
+        "show_result_number": {
+          "type": "boolean"
+        }
+      }
+    },
+    "hashtagRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "remove_spaces",
+        "replace_characters",
+        "max_length",
+        "on_invalid_hashtag"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "remove_spaces": {
+          "type": "boolean"
+        },
+        "replace_characters": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "max_length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "on_invalid_hashtag": {
+          "const": "skip_and_log"
+        }
+      }
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "utcDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

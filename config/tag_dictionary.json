@@ -1,0 +1,284 @@
+{
+  "schema_version": "1.0",
+  "config_version": "1.0.0",
+  "updated_at": "2026-07-18T00:00:00Z",
+  "updated_by": "admin",
+  "items": [
+    {
+      "tag_id": "tag_chinese_subtitle",
+      "display_name": "中文字幕",
+      "slug": "chinese-subtitle",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 100,
+      "category": "subtitle",
+      "aliases": [
+        "中字",
+        "中文",
+        "中文字幕",
+        "chs",
+        "cht",
+        "简中",
+        "繁中",
+        "中文配音"
+      ],
+      "normalized_aliases": [
+        "中字",
+        "中文",
+        "中文字幕",
+        "chs",
+        "cht",
+        "简中",
+        "繁中",
+        "中文配音"
+      ],
+      "description": "带有中文字幕或中文语言支持的内容",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_ntr",
+      "display_name": "NTR",
+      "slug": "ntr",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 90,
+      "category": "theme",
+      "aliases": [
+        "ntr",
+        "寝取られ",
+        "寝取",
+        "绿帽",
+        "绿帽题材"
+      ],
+      "normalized_aliases": [
+        "ntr",
+        "寝取られ",
+        "寝取",
+        "绿帽",
+        "绿帽题材"
+      ],
+      "description": "NTR 题材",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_wife",
+      "display_name": "人妻",
+      "slug": "wife",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 90,
+      "category": "theme",
+      "aliases": [
+        "人妻",
+        "人妻系",
+        "已婚女性",
+        "已婚女人",
+        "主妇"
+      ],
+      "normalized_aliases": [
+        "人妻",
+        "人妻系",
+        "已婚女性",
+        "已婚女人",
+        "主妇"
+      ],
+      "description": "人妻题材",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_female_teacher",
+      "display_name": "女教师",
+      "slug": "female-teacher",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 80,
+      "category": "role",
+      "aliases": [
+        "女教师",
+        "女老师",
+        "教师",
+        "老师",
+        "teacher"
+      ],
+      "normalized_aliases": [
+        "女教师",
+        "女老师",
+        "教师",
+        "老师",
+        "teacher"
+      ],
+      "description": "女教师角色题材",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_nurse",
+      "display_name": "护士",
+      "slug": "nurse",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 80,
+      "category": "role",
+      "aliases": [
+        "护士",
+        "护理师",
+        "看护",
+        "nurse"
+      ],
+      "normalized_aliases": [
+        "护士",
+        "护理师",
+        "看护",
+        "nurse"
+      ],
+      "description": "护士角色题材",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_student",
+      "display_name": "学生",
+      "slug": "student",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 75,
+      "category": "role",
+      "aliases": [
+        "学生",
+        "学生妹",
+        "女学生",
+        "school girl",
+        "student"
+      ],
+      "normalized_aliases": [
+        "学生",
+        "学生妹",
+        "女学生",
+        "school girl",
+        "student"
+      ],
+      "description": "学生角色题材",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_cosplay",
+      "display_name": "COS",
+      "slug": "cosplay",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 70,
+      "category": "theme",
+      "aliases": [
+        "cos",
+        "cosplay",
+        "角色扮演",
+        "coser"
+      ],
+      "normalized_aliases": [
+        "cos",
+        "cosplay",
+        "角色扮演",
+        "coser"
+      ],
+      "description": "角色扮演题材",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_uniform",
+      "display_name": "制服",
+      "slug": "uniform",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 70,
+      "category": "role",
+      "aliases": [
+        "制服",
+        "制服诱惑",
+        "制服系"
+      ],
+      "normalized_aliases": [
+        "制服",
+        "制服诱惑",
+        "制服系"
+      ],
+      "description": "制服题材",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_story",
+      "display_name": "剧情",
+      "slug": "story",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 70,
+      "category": "format",
+      "aliases": [
+        "剧情",
+        "故事",
+        "剧情向",
+        "情节"
+      ],
+      "normalized_aliases": [
+        "剧情",
+        "故事",
+        "剧情向",
+        "情节"
+      ],
+      "description": "有明确剧情或故事设定",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "tag_id": "tag_office",
+      "display_name": "办公室",
+      "slug": "office",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 70,
+      "category": "scene",
+      "aliases": [
+        "办公室",
+        "职场",
+        "公司",
+        "ol",
+        "office"
+      ],
+      "normalized_aliases": [
+        "办公室",
+        "职场",
+        "公司",
+        "ol",
+        "office"
+      ],
+      "description": "办公室或职场场景",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    }
+  ],
+  "rules": {
+    "allow_ai_create_tag": false,
+    "unknown_tag_action": "review",
+    "max_tags_per_video": 20,
+    "max_display_tags_per_video": 8,
+    "sort_by": [
+      "weight_desc",
+      "display_name_asc"
+    ]
+  }
+}

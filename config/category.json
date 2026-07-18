@@ -1,0 +1,145 @@
+{
+  "schema_version": "1.0",
+  "config_version": "1.0.0",
+  "updated_at": "2026-07-18T00:00:00Z",
+  "updated_by": "admin",
+  "items": [
+    {
+      "category_id": "cat_japan",
+      "display_name": "日本",
+      "slug": "japan",
+      "status": "approved",
+      "priority": 100,
+      "aliases": [
+        "日本",
+        "日本影片",
+        "日本成人",
+        "japan",
+        "japanese",
+        "jp",
+        "jav"
+      ],
+      "normalized_aliases": [
+        "日本",
+        "日本影片",
+        "日本成人",
+        "japan",
+        "japanese",
+        "jp",
+        "jav"
+      ],
+      "description": "日本相关内容",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "category_id": "cat_western",
+      "display_name": "欧美",
+      "slug": "western",
+      "status": "approved",
+      "priority": 90,
+      "aliases": [
+        "欧美",
+        "欧美系",
+        "western",
+        "europe",
+        "usa",
+        "american",
+        "欧美影片"
+      ],
+      "normalized_aliases": [
+        "欧美",
+        "欧美系",
+        "western",
+        "europe",
+        "usa",
+        "american",
+        "欧美影片"
+      ],
+      "description": "欧美相关内容",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "category_id": "cat_china",
+      "display_name": "国产",
+      "slug": "china",
+      "status": "approved",
+      "priority": 80,
+      "aliases": [
+        "国产",
+        "中国",
+        "china",
+        "chinese",
+        "cn",
+        "大陆"
+      ],
+      "normalized_aliases": [
+        "国产",
+        "中国",
+        "china",
+        "chinese",
+        "cn",
+        "大陆"
+      ],
+      "description": "中国大陆及国产相关内容",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "category_id": "cat_selfshot",
+      "display_name": "自拍",
+      "slug": "selfshot",
+      "status": "approved",
+      "priority": 70,
+      "aliases": [
+        "自拍",
+        "私拍",
+        "自撮り",
+        "selfshot",
+        "self shot"
+      ],
+      "normalized_aliases": [
+        "自拍",
+        "私拍",
+        "自撮り",
+        "selfshot",
+        "self shot"
+      ],
+      "description": "自拍或私拍类内容",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "category_id": "cat_ai_drama",
+      "display_name": "AI短剧",
+      "slug": "ai-drama",
+      "status": "approved",
+      "priority": 60,
+      "aliases": [
+        "ai短剧",
+        "ai生成",
+        "aigc",
+        "ai剧",
+        "人工智能短剧"
+      ],
+      "normalized_aliases": [
+        "ai短剧",
+        "ai生成",
+        "aigc",
+        "ai剧",
+        "人工智能短剧"
+      ],
+      "description": "AI 生成的短剧类内容",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    }
+  ],
+  "classification_rules": {
+    "allow_multiple_categories": false,
+    "fallback_category": null,
+    "on_no_match": "review",
+    "on_multiple_match": "use_highest_priority",
+    "store_all_candidates": true
+  }
+}

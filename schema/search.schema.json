@@ -1,0 +1,329 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boringniu.example/schema/search.schema.json",
+  "title": "Boringniu search configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "updated_at",
+    "updated_by",
+    "items",
+    "search",
+    "actor_search",
+    "tag_search",
+    "category_search",
+    "code_search",
+    "combined_search",
+    "access_control"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "config_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "updated_at": {
+      "$ref": "#/$defs/utcDateTime"
+    },
+    "updated_by": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default_page_size",
+        "max_page_size",
+        "max_result_count",
+        "query_min_length",
+        "enable_suggestions",
+        "enable_fuzzy_search",
+        "fuzzy_search_min_length",
+        "fuzzy_search_max_distance",
+        "search_order"
+      ],
+      "properties": {
+        "default_page_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "max_page_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "max_result_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "query_min_length": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "enable_suggestions": {
+          "type": "boolean"
+        },
+        "enable_fuzzy_search": {
+          "type": "boolean"
+        },
+        "fuzzy_search_min_length": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fuzzy_search_max_distance": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "search_order": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "exact_code",
+              "exact_actor_alias",
+              "exact_tag_alias",
+              "exact_category_alias",
+              "normalized_match",
+              "prefix_match",
+              "fuzzy_match"
+            ]
+          }
+        }
+      }
+    },
+    "actor_search": {
+      "$ref": "#/$defs/entitySearch"
+    },
+    "tag_search": {
+      "$ref": "#/$defs/entitySearch"
+    },
+    "category_search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "approved_only",
+        "allow_partial_match"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "approved_only": {
+          "const": true
+        },
+        "allow_partial_match": {
+          "const": false
+        }
+      }
+    },
+    "code_search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "exact_match_first",
+        "allow_prefix_search",
+        "allow_fuzzy_match",
+        "normalization",
+        "alphabetical_grouping"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "exact_match_first": {
+          "type": "boolean"
+        },
+        "allow_prefix_search": {
+          "type": "boolean"
+        },
+        "allow_fuzzy_match": {
+          "const": false
+        },
+        "normalization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "uppercase",
+            "remove_spaces",
+            "remove_underscores",
+            "normalize_hyphen",
+            "pattern",
+            "output_format"
+          ],
+          "properties": {
+            "uppercase": {
+              "const": true
+            },
+            "remove_spaces": {
+              "const": true
+            },
+            "remove_underscores": {
+              "const": true
+            },
+            "normalize_hyphen": {
+              "const": true
+            },
+            "pattern": {
+              "const": "^([A-Z]{2,10})[- ]?(\\d{2,6})$"
+            },
+            "output_format": {
+              "const": "$1-$2"
+            }
+          }
+        },
+        "alphabetical_grouping": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "group_by",
+            "sort"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "group_by": {
+              "const": "prefix"
+            },
+            "sort": {
+              "const": "asc"
+            }
+          }
+        }
+      }
+    },
+    "combined_search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "supported_filters",
+        "default_operator_between_filters",
+        "max_filters"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "supported_filters": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "category_id",
+              "actor_id",
+              "tag_id",
+              "code",
+              "subtitle",
+              "year"
+            ]
+          }
+        },
+        "default_operator_between_filters": {
+          "const": "AND"
+        },
+        "max_filters": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      }
+    },
+    "access_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "public_search_approved_only",
+        "allow_pending_for_admin",
+        "allow_raw_metadata_for_admin",
+        "allow_source_link_for_authorized_users_only"
+      ],
+      "properties": {
+        "public_search_approved_only": {
+          "const": true
+        },
+        "allow_pending_for_admin": {
+          "type": "boolean"
+        },
+        "allow_raw_metadata_for_admin": {
+          "type": "boolean"
+        },
+        "allow_source_link_for_authorized_users_only": {
+          "const": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "entitySearch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "search_fields",
+        "approved_only",
+        "allow_partial_match",
+        "allow_fuzzy_match",
+        "sort_by"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "search_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "approved_only": {
+          "const": true
+        },
+        "allow_partial_match": {
+          "type": "boolean"
+        },
+        "allow_fuzzy_match": {
+          "type": "boolean"
+        },
+        "sort_by": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "utcDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "config_version": "1.0.0",
+  "updated_at": "2026-07-18T00:00:00Z",
+  "updated_by": "admin",
+  "items": [
+    {
+      "actor_id": "actor_000001",
+      "display_name_zh_cn": "希岛爱理",
+      "name_ja": "希島あいり",
+      "name_en": "Airi Kijima",
+      "romanized_name": "Kijima Airi",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "aliases": [
+        {
+          "value": "希岛爱理",
+          "normalized_value": "希岛爱理",
+          "language": "zh-CN",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "希島あいり",
+          "normalized_value": "希島あいり",
+          "language": "ja",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Airi Kijima",
+          "normalized_value": "airi kijima",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        },
+        {
+          "value": "Kijima Airi",
+          "normalized_value": "kijima airi",
+          "language": "en",
+          "status": "approved",
+          "source": "manual"
+        }
+      ],
+      "notes": "标准中文简体名称为“希岛爱理”",
+      "created_at": "2026-07-18T00:00:00Z",
+      "updated_at": "2026-07-18T00:00:00Z"
+    }
+  ],
+  "rules": {
+    "allow_ai_translate_actor": false,
+    "allow_ai_create_actor": false,
+    "unknown_actor_action": "review",
+    "max_actors_per_video": 20,
+    "max_display_actors_per_video": 5,
+    "channel_display_field": "display_name_zh_cn"
+  }
+}

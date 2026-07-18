@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boringniu.example/schema/ignored.schema.json",
+  "title": "Boringniu ignored values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "updated_at",
+    "updated_by",
+    "items",
+    "rules"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "config_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "updated_at": {
+      "$ref": "#/$defs/utcDateTime"
+    },
+    "updated_by": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ignoredItem"
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ignored_value_storage",
+        "remove_from_channel_index",
+        "remove_from_public_search",
+        "allow_ignore_title_token",
+        "allow_ignore_raw_tag"
+      ],
+      "properties": {
+        "ignored_value_storage": {
+          "const": "keep_in_raw_data"
+        },
+        "remove_from_channel_index": {
+          "const": true
+        },
+        "remove_from_public_search": {
+          "const": true
+        },
+        "allow_ignore_title_token": {
+          "const": true
+        },
+        "allow_ignore_raw_tag": {
+          "const": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ignoredItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ignore_id",
+        "value",
+        "normalized_value",
+        "scope",
+        "match_mode",
+        "reason",
+        "status",
+        "created_at"
+      ],
+      "properties": {
+        "ignore_id": {
+          "type": "string",
+          "pattern": "^ignore_[0-9]{6,}$"
+        },
+        "value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "normalized_value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "tag",
+              "title_token",
+              "actor",
+              "category",
+              "search_query"
+            ]
+          }
+        },
+        "match_mode": {
+          "enum": [
+            "exact",
+            "normalize",
+            "prefix",
+            "contains",
+            "regex"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "created_at": {
+          "$ref": "#/$defs/utcDateTime"
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "approved",
+        "pending",
+        "ignored",
+        "deprecated",
+        "disabled"
+      ]
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "utcDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

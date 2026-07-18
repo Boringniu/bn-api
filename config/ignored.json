@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "config_version": "1.0.0",
+  "updated_at": "2026-07-18T00:00:00Z",
+  "updated_by": "admin",
+  "items": [
+    {
+      "ignore_id": "ignore_000001",
+      "value": "电影",
+      "normalized_value": "电影",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "无实际筛选价值的泛化词",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000002",
+      "value": "影片",
+      "normalized_value": "影片",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "无实际筛选价值的泛化词",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000003",
+      "value": "成人",
+      "normalized_value": "成人",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "无实际搜索价值",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000004",
+      "value": "1080p",
+      "normalized_value": "1080p",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "清晰度应保存至数据库 quality 字段，不作为标签",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000005",
+      "value": "4k",
+      "normalized_value": "4k",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "清晰度应保存至数据库 quality 字段，不作为标签",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000006",
+      "value": "mkv",
+      "normalized_value": "mkv",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "文件格式应保存至数据库 file_format 字段",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000007",
+      "value": "mp4",
+      "normalized_value": "mp4",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "文件格式应保存至数据库 file_format 字段",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000008",
+      "value": "资源",
+      "normalized_value": "资源",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "无搜索价值的发布噪声",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000009",
+      "value": "合集",
+      "normalized_value": "合集",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "除非未来单独建立合集系统，否则不作为标签",
+      "status": "approved",
+      "created_at": "2026-07-18T00:00:00Z"
+    }
+  ],
+  "rules": {
+    "ignored_value_storage": "keep_in_raw_data",
+    "remove_from_channel_index": true,
+    "remove_from_public_search": true,
+    "allow_ignore_title_token": true,
+    "allow_ignore_raw_tag": true
+  }
+}

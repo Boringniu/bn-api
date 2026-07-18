@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boringniu.example/schema/tag_dictionary.schema.json",
+  "title": "Boringniu tag dictionary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "updated_at",
+    "updated_by",
+    "items",
+    "rules"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "config_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "updated_at": {
+      "$ref": "#/$defs/utcDateTime"
+    },
+    "updated_by": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/tag"
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allow_ai_create_tag",
+        "unknown_tag_action",
+        "max_tags_per_video",
+        "max_display_tags_per_video",
+        "sort_by"
+      ],
+      "properties": {
+        "allow_ai_create_tag": {
+          "const": false
+        },
+        "unknown_tag_action": {
+          "const": "review"
+        },
+        "max_tags_per_video": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "max_display_tags_per_video": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "sort_by": {
+          "const": [
+            "weight_desc",
+            "display_name_asc"
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag_id",
+        "display_name",
+        "slug",
+        "status",
+        "display_enabled",
+        "search_enabled",
+        "weight",
+        "category",
+        "aliases",
+        "normalized_aliases",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "tag_id": {
+          "type": "string",
+          "pattern": "^tag_[a-z0-9_]+$"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "display_enabled": {
+          "type": "boolean"
+        },
+        "search_enabled": {
+          "type": "boolean"
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "category": {
+          "enum": [
+            "theme",
+            "role",
+            "scene",
+            "format",
+            "subtitle",
+            "other"
+          ]
+        },
+        "aliases": {
+          "$ref": "#/$defs/stringList"
+        },
+        "normalized_aliases": {
+          "$ref": "#/$defs/stringList"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "created_at": {
+          "$ref": "#/$defs/utcDateTime"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/utcDateTime"
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "approved",
+        "pending",
+        "ignored",
+        "deprecated",
+        "disabled"
+      ]
+    },
+    "stringList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "utcDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

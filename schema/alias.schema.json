@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boringniu.example/schema/alias.schema.json",
+  "title": "Boringniu global aliases",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "config_version",
+    "updated_at",
+    "updated_by",
+    "items",
+    "rules"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "config_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "updated_at": {
+      "$ref": "#/$defs/utcDateTime"
+    },
+    "updated_by": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/alias"
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allow_duplicate_alias_across_same_target",
+        "allow_alias_point_to_multiple_targets",
+        "default_match_mode",
+        "enabled_types"
+      ],
+      "properties": {
+        "allow_duplicate_alias_across_same_target": {
+          "const": false
+        },
+        "allow_alias_point_to_multiple_targets": {
+          "const": false
+        },
+        "default_match_mode": {
+          "const": "exact"
+        },
+        "enabled_types": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/aliasType"
+          },
+          "allOf": [
+            {
+              "contains": {
+                "const": "actor"
+              }
+            },
+            {
+              "contains": {
+                "const": "tag"
+              }
+            },
+            {
+              "contains": {
+                "const": "category"
+              }
+            },
+            {
+              "contains": {
+                "const": "code_format"
+              }
+            },
+            {
+              "contains": {
+                "const": "search_correction"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alias_id",
+        "alias_type",
+        "raw_value",
+        "normalized_value",
+        "target_type",
+        "target_id",
+        "target_display_name",
+        "status",
+        "match_mode",
+        "source",
+        "notes",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "alias_id": {
+          "type": "string",
+          "pattern": "^alias_[0-9]{6,}$"
+        },
+        "alias_type": {
+          "$ref": "#/$defs/aliasType"
+        },
+        "raw_value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "normalized_value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "target_type": {
+          "enum": [
+            "actor",
+            "tag",
+            "category",
+            "code_pattern",
+            "search_correction"
+          ]
+        },
+        "target_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "target_display_name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "match_mode": {
+          "enum": [
+            "exact",
+            "normalize",
+            "prefix",
+            "contains",
+            "regex"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "notes": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "test_cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "input",
+              "should_match"
+            ],
+            "properties": {
+              "input": {
+                "type": "string"
+              },
+              "should_match": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "created_at": {
+          "$ref": "#/$defs/utcDateTime"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/utcDateTime"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "alias_type": {
+                "const": "actor"
+              }
+            },
+            "required": [
+              "alias_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "match_mode": {
+                "enum": [
+                  "exact",
+                  "normalize"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "match_mode": {
+                "const": "regex"
+              }
+            },
+            "required": [
+              "match_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "test_cases"
+            ]
+          }
+        }
+      ]
+    },
+    "aliasType": {
+      "enum": [
+        "actor",
+        "tag",
+        "category",
+        "code_format",
+        "search_correction"
+      ]
+    },
+    "status": {
+      "enum": [
+        "approved",
+        "pending",
+        "ignored",
+        "deprecated",
+        "disabled"
+      ]
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "utcDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
