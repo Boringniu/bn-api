@@ -10,33 +10,21 @@
 - D1 表结构已就绪（media、分类候选、演员关联、标签关联、review_items、ingest_events、database_metadata），迁移仅在本地应用过。
 - 本地 main 领先 origin/main 4 个提交，尚未推送。
 
-## 阶段一：Cloudflare 部署（当前停点，最优先）
+## 阶段一：Cloudflare 部署（已完成 2026-07-19）
 
-上次执行到"创建 D1 数据库"时授权被取消，未创建任何远程资源。按 progress 文档的恢复步骤执行：
+已全部执行：`bn-media` D1 创建并迁移、`INGEST_TOKEN` 设置、Worker 部署在
+https://bn-api.niu900326.workers.dev ，冒烟验证通过。旧库 `bn2`（空）与
+`boringniu-media` 已删除；后者删除前发现含 90 条旧 Telegram 视频记录
+（file_id / message_id），已整库导出到
+`.backup/boringniu-media-export-20260719.sql`，阶段四做 Bot 时可评估是否
+回灌。
 
-1. `wrangler whoami` 验证或重新 OAuth 登录。
-2. 创建 `bn-media` D1 数据库（或决定复用既有空库 `bn2` / `boringniu-media`，建议新建以匹配仓库配置）。
-3. 将返回的 database UUID 写入 `wrangler.jsonc`（当前是全零占位符）。
-4. `npm run db:migrate:remote` 远程应用两个迁移。
-5. `wrangler secret put INGEST_TOKEN` 设置 Worker 密钥。
-6. `npm run deploy` 部署，请求 `/health` 验证。
-7. 用真实 Token POST 一条测试数据到 `/v1/media`，确认 D1 写入和审核队列生成。
+## 阶段二：查询与搜索 API（已完成 2026-07-19）
 
-产出：可用的线上入库 API。预计半天内完成（主要是等授权确认）。
-
-## 阶段二：查询与搜索 API
-
-Worker 目前只写不读。按 `config/search.json` 已定义的规则实现：
-
-1. `GET /v1/media/:id` — 单条详情（含分类、演员、标签快照）。
-2. `GET /v1/search` — 按 search_order 实现：番号精确 → 演员别名 → 标签别名 → 分类别名 → 标准化匹配 → 前缀 → 模糊。公开结果仅 `approved`（access_control 已锁死）。
-3. 组合筛选（category_id、actor_id、tag_id、code、subtitle、year，AND，最多 5 个）。
-4. 分页（默认 10，上限 20，总量 200）。
-5. 番号前缀分组浏览（alphabetical_grouping）。
-6. 为搜索路径补 D1 索引（现有索引覆盖 code/category/year/title，演员与标签按名称搜索可能需要补充）。
-7. 契约测试：结果结构写入 contracts/，模仿现有 tag-normalization-result 的做法。
-
-依赖：阶段一完成（需要真实 D1 做集成验证，单元测试可先行）。
+已实现并线上验证：`GET /v1/search`（q 智能解析走完整 search_order 链 +
+组合筛选 ≤5 + 分页/200 上限）、`GET /v1/media/:id`、`GET /v1/codes`。
+公开结果仅 approved；忽略词返回空；模糊匹配 Levenshtein ≤2。
+遗留优化：演员/标签按名称的 D1 级搜索索引（当前走内存字典已够用）。
 
 ## 阶段三：审核后台 API
 
