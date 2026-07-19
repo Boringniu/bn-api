@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.0.0",
-  "updated_at": "2026-07-18T00:00:00Z",
+  "config_version": "1.1.0",
+  "updated_at": "2026-07-19T08:04:44Z",
   "updated_by": "admin",
   "items": [
     {
@@ -117,6 +117,97 @@
       "reason": "除非未来单独建立合集系统，否则不作为标签",
       "status": "approved",
       "created_at": "2026-07-18T00:00:00Z"
+    },
+    {
+      "ignore_id": "ignore_000010",
+      "value": "无码",
+      "normalized_value": "无码",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "无码或无修正写法：审查状态属于元数据，应保存至 D1 media.metadata_json，不作为标准标签（配置标准 §五）",
+      "status": "approved",
+      "created_at": "2026-07-19T08:04:44Z"
+    },
+    {
+      "ignore_id": "ignore_000011",
+      "value": "無碼",
+      "normalized_value": "無碼",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "无码或无修正写法：审查状态属于元数据，应保存至 D1 media.metadata_json，不作为标准标签（配置标准 §五）",
+      "status": "approved",
+      "created_at": "2026-07-19T08:04:44Z"
+    },
+    {
+      "ignore_id": "ignore_000012",
+      "value": "无修正",
+      "normalized_value": "无修正",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "无码或无修正写法：审查状态属于元数据，应保存至 D1 media.metadata_json，不作为标准标签（配置标准 §五）",
+      "status": "approved",
+      "created_at": "2026-07-19T08:04:44Z"
+    },
+    {
+      "ignore_id": "ignore_000013",
+      "value": "uncensored",
+      "normalized_value": "uncensored",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "无码或无修正写法：审查状态属于元数据，应保存至 D1 media.metadata_json，不作为标准标签（配置标准 §五）",
+      "status": "approved",
+      "created_at": "2026-07-19T08:04:44Z"
+    },
+    {
+      "ignore_id": "ignore_000014",
+      "value": "有码",
+      "normalized_value": "有码",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "有码写法：审查状态属于元数据，应保存至 D1 media.metadata_json，不作为标准标签（配置标准 §五）",
+      "status": "approved",
+      "created_at": "2026-07-19T08:04:44Z"
+    },
+    {
+      "ignore_id": "ignore_000015",
+      "value": "有碼",
+      "normalized_value": "有碼",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "有码写法：审查状态属于元数据，应保存至 D1 media.metadata_json，不作为标准标签（配置标准 §五）",
+      "status": "approved",
+      "created_at": "2026-07-19T08:04:44Z"
+    },
+    {
+      "ignore_id": "ignore_000016",
+      "value": "censored",
+      "normalized_value": "censored",
+      "scope": [
+        "tag",
+        "title_token"
+      ],
+      "match_mode": "exact",
+      "reason": "有码写法：审查状态属于元数据，应保存至 D1 media.metadata_json，不作为标准标签（配置标准 §五）",
+      "status": "approved",
+      "created_at": "2026-07-19T08:04:44Z"
     }
   ],
   "rules": {

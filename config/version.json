@@ -1,13 +1,13 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.1.0",
-  "updated_at": "2026-07-18T18:04:37Z",
+  "config_version": "1.2.0",
+  "updated_at": "2026-07-19T08:04:44Z",
   "updated_by": "admin",
   "items": [],
   "release": {
-    "version": "1.1.0",
-    "release_date": "2026-07-18",
-    "description": "扩充演员、分类别名和标签字典"
+    "version": "1.2.0",
+    "release_date": "2026-07-19",
+    "description": "无码/有码降级为 deprecated，审查状态写法进入忽略词"
   },
   "compatibility": {
     "minimum_worker_version": "1.0.0",
@@ -16,10 +16,10 @@
   },
   "files": {
     "category": "1.1.0",
-    "tag_dictionary": "1.1.0",
+    "tag_dictionary": "1.2.0",
     "actor_dictionary": "1.1.0",
     "alias": "1.0.0",
-    "ignored": "1.0.0",
+    "ignored": "1.1.0",
     "display": "1.0.0",
     "search": "1.0.0",
     "review_rules": "1.0.0"

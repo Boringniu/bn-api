@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.1.0",
-  "updated_at": "2026-07-18T18:04:37Z",
+  "config_version": "1.2.0",
+  "updated_at": "2026-07-19T08:04:44Z",
   "updated_by": "admin",
   "items": [
     {
@@ -302,9 +302,9 @@
       "tag_id": "tag_uncensored",
       "display_name": "无码",
       "slug": "uncensored",
-      "status": "approved",
-      "display_enabled": true,
-      "search_enabled": true,
+      "status": "deprecated",
+      "display_enabled": false,
+      "search_enabled": false,
       "weight": 95,
       "category": "format",
       "aliases": [
@@ -319,17 +319,17 @@
         "无修正",
         "uncensored"
       ],
-      "description": "无码或无修正内容",
+      "description": "无码或无修正内容（按配置标准 §五 降级：审查状态属于元数据，存入 D1 metadata_json，不作为标准标签；ID 保留不复用）",
       "created_at": "2026-07-18T18:04:37Z",
-      "updated_at": "2026-07-18T18:04:37Z"
+      "updated_at": "2026-07-19T08:04:44Z"
     },
     {
       "tag_id": "tag_censored",
       "display_name": "有码",
       "slug": "censored",
-      "status": "approved",
-      "display_enabled": true,
-      "search_enabled": true,
+      "status": "deprecated",
+      "display_enabled": false,
+      "search_enabled": false,
       "weight": 95,
       "category": "format",
       "aliases": [
@@ -342,9 +342,9 @@
         "有碼",
         "censored"
       ],
-      "description": "有码内容",
+      "description": "有码内容（按配置标准 §五 降级：审查状态属于元数据，存入 D1 metadata_json，不作为标准标签；ID 保留不复用）",
       "created_at": "2026-07-18T18:04:37Z",
-      "updated_at": "2026-07-18T18:04:37Z"
+      "updated_at": "2026-07-19T08:04:44Z"
     },
     {
       "tag_id": "tag_big_bust",
