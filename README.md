@@ -2,6 +2,15 @@
 
 Boringniuniu 影视库的唯一规则配置中心。分类、标签、演员名称、别名、忽略词、展示格式、搜索参数和审核策略都在此仓库维护，下游 worker、bot 和管理端只消费已通过校验的配置。
 
+## 架构边界
+
+本项目遵循 [GitHub 配置标准 v1.0](docs/architecture.md)：
+
+- GitHub 是影视库的唯一规则中心。
+- D1 只保存内容事实、规则处理结果和审核记录。
+- Worker 与 Bot 只读取已通过校验的配置并执行。
+- AI 只能向审核队列提交建议，不能直接创建、批准或修改规则。
+
 ## 目录
 
 | 路径 | 作用 |
@@ -9,14 +18,16 @@ Boringniuniu 影视库的唯一规则配置中心。分类、标签、演员名�
 | `config/` | 实际生效的 JSON 配置 |
 | `schema/` | 与配置文件一一对应的 JSON Schema |
 | `contracts/` | 下游运行时结果的 JSON Schema |
+| `migrations/` | D1 内容事实、关联结果和审核队列表结构 |
 | `src/` | 配置驱动的运行时规则实现 |
 | `scripts/` | 结构校验、规则执行和 manifest 构建 |
 | `test/` | 运行时规则和输出契约测试 |
+| `wrangler.jsonc` | `bn-api` Worker 和 D1 binding 配置 |
 | `dist/config-manifest.json` | `npm run build:manifest` 生成的消费清单，不提交 Git |
 
 ## 本地检查
 
-需要 Node.js 20 或更高版本。
+需要 Node.js 22 或更高版本。
 
 ```bash
 npm ci
@@ -27,8 +38,9 @@ npm run check
 
 1. `npm run validate`：校验 JSON Schema、ID 唯一性、规范化值、版本声明、跨配置上限和正则表达式。
 2. `npm run check:aliases`：检查别名重复、一个别名指向多个目标、忽略词冲突和全局别名目标引用。
-3. `npm test`：验证标签规范化行为及其输出契约。
+3. `npm test`：验证标签、演员和番号归一化，以及媒体入库与 Worker 接口行为。
 4. `npm run build:manifest`：生成包含版本、文件大小和 SHA-256 的 `dist/config-manifest.json`。
+5. `npm run build:worker`：执行 Wrangler dry-run，确认 Worker 可以打包并识别 D1 binding。
 
 ## 标签规范化
 
@@ -72,3 +84,46 @@ printf '%s\n' '{"raw_tags":["日本成人","CHS","电影"]}' | npm run normalize
 | `review_rules.json` | 待审核类型、阈值、操作和 GitHub 同步策略 |
 
 下游应先读取 manifest，对文件 SHA-256 校验通过后再加载配置。`config/version.json` 是兼容性判断的权威来源。
+
+## Worker 与 D1
+
+Worker 提供以下基础接口：
+
+- `GET /health`：服务与规则版本检查。
+- `POST /v1/media`：受 `INGEST_TOKEN` 保护的幂等媒体入库接口。
+
+首次部署前：
+
+1. 运行 `npm run db:create` 创建 `bn-media` D1 数据库。
+2. 将返回的数据库 ID 写入 `wrangler.jsonc` 的 `database_id`。
+3. 运行 `npm run db:migrate:remote` 应用迁移。
+4. 运行 `npx wrangler secret put INGEST_TOKEN` 配置入库密钥。
+5. 运行 `npm run deploy` 部署 `bn-api`。
+
+本地开发使用 `npm run db:migrate:local` 和 `npm run dev`。本地密钥写入不提交 Git 的 `.dev.vars`：
+
+Worker 工具链使用 Wrangler 4，要求 Node.js 22 或更高版本。
+
+```dotenv
+INGEST_TOKEN=replace-with-a-random-secret
+```
+
+入库请求示例：
+
+```json
+{
+  "source": {
+    "provider": "example",
+    "external_id": "video-001",
+    "url": "https://example.com/video-001"
+  },
+  "title": "样例影片",
+  "code": "ABP 123",
+  "release_date": "2026-07-19",
+  "actors": ["希島愛理"],
+  "raw_tags": ["日本成人", "NTR", "CHS"],
+  "metadata": {
+    "source_channel": "example"
+  }
+}
+```
