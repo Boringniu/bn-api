@@ -1,6 +1,9 @@
 import { normalizeValue } from "./value-normalizer.mjs";
 
 const TELEGRAM_API = "https://api.telegram.org";
+// Telegram hard limit is 4096 chars per message; leave headroom.
+const PAGE_CHAR_LIMIT = 3800;
+const TAGS_PER_LINE = 6;
 
 export function createTelegramService({
   categoryConfig,
@@ -260,6 +263,15 @@ export function createTelegramService({
             });
           }
         }
+        // Keep the pinned index live: every approved channel video refreshes
+        // it immediately. Failures must not break the ingest ack to Telegram.
+        try {
+          await this.refreshPinnedIndex(db, env);
+        } catch (error) {
+          console.warn("pinned index refresh failed", {
+            message: error.message,
+          });
+        }
       }
 
       return { ingested: result.id, status: result.status };
@@ -456,47 +468,64 @@ export function createTelegramService({
         `),
       ]);
 
-      const text = this.renderPinnedIndex({
+      const pages = this.renderIndexPages({
         categories: categoryRows.results ?? [],
         actors: actorRows.results ?? [],
         tags: tagRows.results ?? [],
       });
 
-      const existing = await db
-        .prepare("SELECT value FROM database_metadata WHERE key = ?")
-        .bind("channel_pinned_index_message_id")
-        .first();
-      const timestamp = new Date().toISOString();
+      const stored = await readIndexMessageIds(db);
+      const messageIds = [];
+      let pinnedNew = false;
 
-      if (existing) {
-        const messageId = Number(existing.value);
-        try {
-          await this.callTelegram(env, "editMessageText", {
+      for (const [pageIndex, text] of pages.entries()) {
+        const existingId = stored[pageIndex];
+        if (existingId) {
+          try {
+            await this.callTelegram(env, "editMessageText", {
+              chat_id: channelId,
+              message_id: existingId,
+              text,
+            });
+            messageIds.push(existingId);
+            continue;
+          } catch (error) {
+            if (String(error.message).includes("message is not modified")) {
+              messageIds.push(existingId);
+              continue;
+            }
+            if (!/message to edit not found|MESSAGE_ID_INVALID/iu.test(error.message)) {
+              throw error;
+            }
+            // Deleted by hand: fall through and send a replacement page.
+          }
+        }
+        const sent = await this.callTelegram(env, "sendMessage", {
+          chat_id: channelId,
+          text,
+        });
+        messageIds.push(sent.message_id);
+        if (pageIndex === 0) {
+          await this.callTelegram(env, "pinChatMessage", {
             chat_id: channelId,
-            message_id: messageId,
-            text,
+            message_id: sent.message_id,
+            disable_notification: true,
           });
-          return { outcome: "edited", tg_message_id: messageId };
-        } catch (error) {
-          if (String(error.message).includes("message is not modified")) {
-            return { outcome: "unchanged", tg_message_id: messageId };
-          }
-          // Fall through and repost when the stored message no longer exists.
-          if (!String(error.message).includes("message to edit not found")) {
-            throw error;
-          }
+          pinnedNew = true;
         }
       }
 
-      const sent = await this.callTelegram(env, "sendMessage", {
-        chat_id: channelId,
-        text,
-      });
-      await this.callTelegram(env, "pinChatMessage", {
-        chat_id: channelId,
-        message_id: sent.message_id,
-        disable_notification: true,
-      });
+      for (const surplusId of stored.slice(pages.length)) {
+        try {
+          await this.callTelegram(env, "deleteMessage", {
+            chat_id: channelId,
+            message_id: surplusId,
+          });
+        } catch {
+          // Already gone is fine.
+        }
+      }
+
       await db
         .prepare(
           `INSERT INTO database_metadata (key, value, updated_at)
@@ -504,12 +533,21 @@ export function createTelegramService({
            ON CONFLICT (key) DO UPDATE SET
              value = excluded.value, updated_at = excluded.updated_at`,
         )
-        .bind("channel_pinned_index_message_id", String(sent.message_id), timestamp)
+        .bind(
+          "channel_index_message_ids",
+          JSON.stringify(messageIds),
+          new Date().toISOString(),
+        )
         .run();
-      return { outcome: "pinned", tg_message_id: sent.message_id };
+
+      return {
+        outcome: pinnedNew ? "pinned" : "edited",
+        pages: pages.length,
+        message_ids: messageIds,
+      };
     },
 
-    renderPinnedIndex({ categories, actors, tags }) {
+    renderIndexPages({ categories, actors, tags }) {
       const categoryTags = categories
         .map((row) => {
           const display = categoryDisplayNames.get(row.category_id);
@@ -527,17 +565,37 @@ export function createTelegramService({
         .map((row) => hashtag(row.display_name, channelIndex.tag_prefix))
         .filter(Boolean);
 
-      let text = channelIndex.template
-        .replaceAll("{{category_tags}}", categoryTags.join(" "))
-        .replaceAll("{{actor_tags}}", actorTags.join(" "))
-        .replaceAll("{{type_tags}}", typeTags.join(" "));
-      text = text.replace(/\n{3,}/gu, "\n\n").trim();
+      const blocks = [
+        { label: channelIndex.category_label, lines: chunkTags(categoryTags) },
+        { label: channelIndex.actors_label, lines: chunkTags(actorTags) },
+        { label: channelIndex.tags_label, lines: chunkTags(typeTags) },
+      ];
 
-      // Telegram message limit; keep a safety margin for future growth.
-      if (text.length > 4000) {
-        text = `${text.slice(0, 3990)}\n…`;
+      const pages = [];
+      let current = channelIndex.title;
+      const pushPage = () => {
+        pages.push(current.trim());
+        current = `${channelIndex.title}（续）`;
+      };
+
+      for (const block of blocks) {
+        let blockHeader = `\n\n${block.label}`;
+        if (current.length + blockHeader.length > PAGE_CHAR_LIMIT) {
+          pushPage();
+        }
+        current += blockHeader;
+        let continued = false;
+        for (const line of block.lines) {
+          if (current.length + line.length + 1 > PAGE_CHAR_LIMIT) {
+            pushPage();
+            current += `\n\n${block.label}（续）`;
+            continued = true;
+          }
+          current += `\n${line}`;
+        }
       }
-      return text;
+      pushPage();
+      return pages;
     },
 
     async callTelegram(env, method, payload) {
@@ -605,6 +663,36 @@ export function createTelegramService({
       )
       .run();
   }
+}
+
+function chunkTags(tags) {
+  const lines = [];
+  for (let i = 0; i < tags.length; i += TAGS_PER_LINE) {
+    lines.push(tags.slice(i, i + TAGS_PER_LINE).join(" "));
+  }
+  return lines;
+}
+
+async function readIndexMessageIds(db) {
+  const row = await db
+    .prepare("SELECT value FROM database_metadata WHERE key = ?")
+    .bind("channel_index_message_ids")
+    .first();
+  if (row?.value) {
+    try {
+      const parsed = JSON.parse(row.value);
+      if (Array.isArray(parsed)) {
+        return parsed.map(Number);
+      }
+    } catch {
+      // fall through to legacy single-id key
+    }
+  }
+  const legacy = await db
+    .prepare("SELECT value FROM database_metadata WHERE key = ?")
+    .bind("channel_pinned_index_message_id")
+    .first();
+  return legacy?.value ? [Number(legacy.value)] : [];
 }
 
 function resolutionFilters(resolution) {

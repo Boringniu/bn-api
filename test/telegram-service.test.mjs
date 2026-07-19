@@ -214,10 +214,12 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
       [{ display_name: "希岛爱理" }, { display_name: "波多野结衣" }],
       [{ display_name: "人妻", weight: 90 }],
     ],
-    firstResults: [null],
+    firstResults: [null, null],
   });
   const pinned = await service.refreshPinnedIndex(freshDb, env);
   assert.equal(pinned.outcome, "pinned");
+  assert.equal(pinned.pages, 1);
+  assert.deepEqual(pinned.message_ids, [55]);
   assert.ok(telegramCalls.some((c) => c.url.includes("/pinChatMessage")));
   const sendCall = telegramCalls.find((c) => c.url.includes("/sendMessage"));
   assert.ok(sendCall.body.text.includes("#日本 (23)"));
@@ -230,12 +232,98 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   telegramCalls.length = 0;
   const editDb = new FakeD1({
     batchResults: [[], [], []],
-    firstResults: [{ value: "55" }],
+    firstResults: [{ value: "[55]" }],
   });
   const edited = await service.refreshPinnedIndex(editDb, env);
   assert.equal(edited.outcome, "edited");
   assert.ok(telegramCalls[0].url.includes("/editMessageText"));
   assert.equal(telegramCalls[0].body.message_id, 55);
+});
+
+test("index paginates into multiple messages when tags overflow", async () => {
+  const telegramCalls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return {
+        json: async () => ({ ok: true, result: { message_id: 100 + telegramCalls.length } }),
+      };
+    },
+  });
+  const manyActors = Array.from({ length: 700 }, (_, i) => ({
+    display_name: `虚构演员名字第${String(i).padStart(4, "0")}号`,
+  }));
+  const db = new FakeD1({
+    batchResults: [
+      [{ category_id: "cat_japan", media_count: 700 }],
+      manyActors,
+      [{ display_name: "人妻", weight: 90 }],
+    ],
+    firstResults: [null, null],
+  });
+
+  const result = await service.refreshPinnedIndex(db, {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_CHANNEL_ID: "-100",
+  });
+
+  assert.ok(result.pages > 1, `expected multiple pages, got ${result.pages}`);
+  assert.equal(result.message_ids.length, result.pages);
+  const sends = telegramCalls.filter((c) => c.url.includes("/sendMessage"));
+  assert.equal(sends.length, result.pages);
+  for (const send of sends) {
+    assert.ok(send.body.text.length <= 4096);
+  }
+  const pins = telegramCalls.filter((c) => c.url.includes("/pinChatMessage"));
+  assert.equal(pins.length, 1, "only the first page is pinned");
+  assert.ok(sends[1].body.text.includes("（续）"));
+});
+
+test("approved channel video refreshes the index automatically", async () => {
+  const telegramCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest() {
+        return {
+          id: "media_new",
+          status: "approved",
+          category: { category_id: "cat_japan", display_name: "日本" },
+          actors: [],
+          tags: [],
+        };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 5 } }) };
+    },
+  });
+  const db = new FakeD1({
+    batchResults: [[], [], []],
+    firstResults: [null, null],
+  });
+
+  await service.handleUpdate(
+    db,
+    {
+      channel_post: {
+        chat: { id: -100 },
+        message_id: 9,
+        video: { file_id: "F", file_name: "ABP-123.mp4" },
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-100" },
+  );
+
+  assert.ok(
+    telegramCalls.some((c) => c.url.includes("/pinChatMessage")),
+    "index refresh should run after approved ingest",
+  );
 });
 
 test("channel video post is ingested and gets a hashtag caption", async () => {
