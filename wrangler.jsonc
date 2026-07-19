@@ -10,7 +10,7 @@
     {
       "binding": "DB",
       "database_name": "bn-media",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "d96aa928-4441-4f39-ab46-c9cf1560c2fc",
       "migrations_dir": "migrations"
     }
   ]
