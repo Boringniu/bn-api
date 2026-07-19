@@ -37,14 +37,27 @@ Bearer secret（REVIEW_TOKEN_EDITOR / REVIEW_TOKEN_ADMIN，值在本地
 建议改动）存入 resolution_json，由人工提 PR 落地，符合标准 §十五。
 遗留：受影响 media 的重新标准化标记（并入阶段五的重索引）。
 
-## 阶段四：Telegram Bot 与频道
+## 阶段四：Telegram Bot 与频道（已完成 2026-07-19）
 
-1. Bot Webhook Worker（或并入 bn-api）：接收查询，按阶段二的搜索 API 返回结果，遵守 display.json 的 bot_result 规则（page_size 10、显示番号、来源链接仅授权用户）。
-2. 频道索引发布：按 display.json 的 channel_index 模板生成消息（只展示分类/演员/类型三块，hashtag 规则替换分隔符），记录 Telegram Message ID 到 D1。
-3. 内容更新时的频道消息编辑/重发策略。
-4. 搜索日志写入 D1（为后续热词分析和 alias 候选做数据积累）。
+Bot：@MMCOOBOT（沿用原 Bot，旧 file_id 保持可用）。频道：`-1004460339207`
+（新建）。管理员：`8351469516`。
 
-依赖：阶段二。需要新增：Bot Token secret、频道 ID 配置、Telegram 相关表迁移（message_id 映射，标准 §十八已声明归 D1）。
+已实现并上线：
+- `POST /telegram/webhook`（Telegram secret header 校验）：Bot 收到任意
+  文本即走 search_order 解析并回复；/start /help 有引导；每次查询写入
+  search_logs（含解析类型与命中目标，为热词分析积累数据）。
+- `POST /v1/channel/publish/:id`（ingest token 鉴权）：按 display.json
+  模板渲染频道索引消息（仅分类/演员/类型三块、hashtag 替换规则、
+  上限截断、空块隐藏），message_id 记入 channel_posts；再次发布自动
+  editMessageText，"内容未变"响应按成功处理。
+- 迁移 0003：channel_posts、search_logs、media_files。
+- 旧库 32 条有标题记录经 /v1/media 重新入库（22 approved + 10 进审核，
+  即 pending_actor 等待确认），file_id 全部存入 media_files；40 条
+  "未命名视频"按约定放弃（导出 SQL 备份仍在 .backup/）。
+- 23 条 approved 内容已全部发布到新频道并可搜索验证。
+
+遗留：Bot 发视频文件（用 media_files 的 file_id 响应搜索结果）、
+/page 翻页命令的会话状态——可并入阶段五后打磨。
 
 ## 阶段五：配置热更新与重索引
 
