@@ -3,6 +3,7 @@ import actorDictionaryConfig from "../config/actor_dictionary.json" with {
 };
 import aliasConfig from "../config/alias.json" with { type: "json" };
 import categoryConfig from "../config/category.json" with { type: "json" };
+import displayConfig from "../config/display.json" with { type: "json" };
 import ignoredConfig from "../config/ignored.json" with { type: "json" };
 import reviewRulesConfig from "../config/review_rules.json" with {
   type: "json",
@@ -19,6 +20,7 @@ import { createMediaInputParser } from "./media-input.mjs";
 import { createReviewService } from "./review-service.mjs";
 import { createSearchService } from "./search-service.mjs";
 import { createTagNormalizer } from "./tag-normalizer.mjs";
+import { createTelegramService } from "./telegram-service.mjs";
 import { createWorkerApp } from "./worker-app.mjs";
 
 const actorNormalizer = createActorNormalizer({
@@ -43,19 +45,26 @@ const ingestService = createIngestService({
   tagNormalizer,
   versionConfig,
 });
+const searchService = createSearchService({
+  actorDictionaryConfig,
+  aliasConfig,
+  categoryConfig,
+  ignoredConfig,
+  searchConfig,
+  tagDictionaryConfig,
+  versionConfig,
+});
 const app = createWorkerApp({
   ingestService,
   reviewService: createReviewService({
     reviewRulesConfig,
     versionConfig,
   }),
-  searchService: createSearchService({
-    actorDictionaryConfig,
-    aliasConfig,
-    categoryConfig,
-    ignoredConfig,
+  searchService,
+  telegramService: createTelegramService({
+    displayConfig,
     searchConfig,
-    tagDictionaryConfig,
+    searchService,
     versionConfig,
   }),
   versionConfig,

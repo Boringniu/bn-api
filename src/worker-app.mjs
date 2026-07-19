@@ -7,6 +7,7 @@ export function createWorkerApp({
   ingestService,
   reviewService,
   searchService,
+  telegramService,
   versionConfig,
 }) {
   return Object.freeze({
@@ -83,6 +84,37 @@ export function createWorkerApp({
             target: payload.target,
             edited_values: payload.edited_values,
           });
+          return jsonResponse({ data: result }, 200, requestId);
+        }
+
+        if (request.method === "POST" && url.pathname === "/telegram/webhook") {
+          assertTelegramWebhook(request, env);
+          assertBodySize(request);
+          assertDb(env);
+          const update = await readJson(request);
+          await telegramService.handleUpdate(env.DB, update, env);
+          return jsonResponse({ ok: true }, 200, requestId);
+        }
+
+        const publishMatch = url.pathname.match(
+          /^\/v1\/channel\/publish\/([a-z0-9_]+)$/,
+        );
+        if (request.method === "POST" && publishMatch) {
+          assertAuthorized(request, env);
+          assertDb(env);
+          const media = await searchService.getMedia(env.DB, publishMatch[1]);
+          if (!media) {
+            throw new HttpError(
+              404,
+              "media not found or not approved",
+              "media_not_found",
+            );
+          }
+          const result = await telegramService.publishToChannel(
+            env.DB,
+            media,
+            env,
+          );
           return jsonResponse({ data: result }, 200, requestId);
         }
 
@@ -267,6 +299,20 @@ function assertReviewer(request, env) {
     return { role: "editor" };
   }
   throw new HttpError(401, "invalid bearer token", "unauthorized");
+}
+
+function assertTelegramWebhook(request, env) {
+  if (!env.TELEGRAM_WEBHOOK_SECRET) {
+    throw new HttpError(
+      503,
+      "TELEGRAM_WEBHOOK_SECRET is not configured",
+      "service_not_configured",
+    );
+  }
+  const secret = request.headers.get("x-telegram-bot-api-secret-token");
+  if (secret !== env.TELEGRAM_WEBHOOK_SECRET) {
+    throw new HttpError(401, "invalid webhook secret", "unauthorized");
+  }
 }
 
 function assertDb(env) {
