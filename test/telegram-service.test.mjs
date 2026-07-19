@@ -13,6 +13,7 @@ const versionConfig = configs.get("version").data;
 
 function createService({ searchService, fetchImpl } = {}) {
   return createTelegramService({
+    categoryConfig: configs.get("category").data,
     displayConfig,
     searchConfig: configs.get("search").data,
     searchService: searchService ?? createSearchStub(),
@@ -158,7 +159,7 @@ test("publishToChannel creates then edits, tracking message ids", async () => {
     TELEGRAM_CHANNEL_ID: "-1004460339207",
   };
 
-  const createDb = new FakeD1();
+  const createDb = new FakeD1({ firstResults: [null, null] });
   const created = await service.publishToChannel(createDb, sampleMedia, env);
   assert.equal(created.outcome, "created");
   assert.equal(created.tg_message_id, 42);
@@ -167,10 +168,74 @@ test("publishToChannel creates then edits, tracking message ids", async () => {
     createDb.statements.some((s) => s.sql.includes("INSERT INTO channel_posts")),
   );
 
-  const editDb = new FakeD1({ existing: { tg_message_id: 42 } });
+  const editDb = new FakeD1({
+    firstResults: [null, { tg_message_id: 42 }],
+  });
   const edited = await service.publishToChannel(editDb, sampleMedia, env);
   assert.equal(edited.outcome, "edited");
   assert.ok(telegramCalls[1].url.includes("/editMessageText"));
+});
+
+test("publishToChannel sends video with caption when a file_id exists", async () => {
+  const telegramCalls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 9 } }) };
+    },
+  });
+  const db = new FakeD1({
+    firstResults: [{ tg_file_id: "FILE123" }, null],
+  });
+
+  const result = await service.publishToChannel(db, sampleMedia, {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_CHANNEL_ID: "-100",
+  });
+
+  assert.equal(result.kind, "video");
+  assert.ok(telegramCalls[0].url.includes("/sendVideo"));
+  assert.equal(telegramCalls[0].body.video, "FILE123");
+  assert.ok(telegramCalls[0].body.caption.includes("#希岛爱理"));
+});
+
+test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
+  const telegramCalls = [];
+  const fetchImpl = async (url, init) => {
+    telegramCalls.push({ url, body: JSON.parse(init.body) });
+    return { json: async () => ({ ok: true, result: { message_id: 55 } }) };
+  };
+  const service = createService({ fetchImpl });
+  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-100" };
+
+  const freshDb = new FakeD1({
+    batchResults: [
+      [{ category_id: "cat_japan", media_count: 23 }],
+      [{ display_name: "希岛爱理" }, { display_name: "波多野结衣" }],
+      [{ display_name: "人妻", weight: 90 }],
+    ],
+    firstResults: [null],
+  });
+  const pinned = await service.refreshPinnedIndex(freshDb, env);
+  assert.equal(pinned.outcome, "pinned");
+  assert.ok(telegramCalls.some((c) => c.url.includes("/pinChatMessage")));
+  const sendCall = telegramCalls.find((c) => c.url.includes("/sendMessage"));
+  assert.ok(sendCall.body.text.includes("#日本 (23)"));
+  assert.ok(sendCall.body.text.includes("#希岛爱理"));
+  assert.ok(sendCall.body.text.includes("#人妻"));
+  assert.ok(
+    freshDb.statements.some((s) => s.sql.includes("INSERT INTO database_metadata")),
+  );
+
+  telegramCalls.length = 0;
+  const editDb = new FakeD1({
+    batchResults: [[], [], []],
+    firstResults: [{ value: "55" }],
+  });
+  const edited = await service.refreshPinnedIndex(editDb, env);
+  assert.equal(edited.outcome, "edited");
+  assert.ok(telegramCalls[0].url.includes("/editMessageText"));
+  assert.equal(telegramCalls[0].body.message_id, 55);
 });
 
 function createSearchStub({ resolution = null, media = [] } = {}) {
@@ -191,8 +256,10 @@ function createSearchStub({ resolution = null, media = [] } = {}) {
 }
 
 class FakeD1 {
-  constructor({ existing = null } = {}) {
+  constructor({ existing = null, firstResults = null, batchResults = null } = {}) {
     this.existing = existing;
+    this.firstResults = firstResults;
+    this.batchResults = batchResults;
     this.statements = [];
   }
 
@@ -207,6 +274,9 @@ class FakeD1 {
       },
       async first() {
         db.statements.push(this);
+        if (db.firstResults) {
+          return db.firstResults.shift() ?? null;
+        }
         return db.existing;
       },
       async run() {
@@ -218,6 +288,9 @@ class FakeD1 {
 
   async batch(statements) {
     this.statements.push(...statements);
+    if (this.batchResults) {
+      return statements.map((_, i) => ({ results: this.batchResults[i] ?? [] }));
+    }
     return statements.map(() => ({ results: [] }));
   }
 }

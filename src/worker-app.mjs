@@ -118,6 +118,13 @@ export function createWorkerApp({
           return jsonResponse({ data: result }, 200, requestId);
         }
 
+        if (request.method === "POST" && url.pathname === "/v1/channel/index") {
+          assertAuthorized(request, env);
+          assertDb(env);
+          const result = await telegramService.refreshPinnedIndex(env.DB, env);
+          return jsonResponse({ data: result }, 200, requestId);
+        }
+
         if (request.method === "POST" && url.pathname === "/v1/media") {
           assertAuthorized(request, env);
           assertJsonRequest(request);

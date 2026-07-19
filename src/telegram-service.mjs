@@ -3,6 +3,7 @@ import { normalizeValue } from "./value-normalizer.mjs";
 const TELEGRAM_API = "https://api.telegram.org";
 
 export function createTelegramService({
+  categoryConfig,
   displayConfig,
   searchConfig,
   searchService,
@@ -10,6 +11,7 @@ export function createTelegramService({
   fetchImpl = fetch,
 }) {
   for (const [name, value] of Object.entries({
+    categoryConfig,
     displayConfig,
     searchConfig,
     searchService,
@@ -23,6 +25,9 @@ export function createTelegramService({
   const channelIndex = displayConfig.channel_index;
   const botResult = displayConfig.bot_result;
   const hashtagRules = displayConfig.hashtag_rules;
+  const categoryDisplayNames = new Map(
+    categoryConfig.items.map((item) => [item.category_id, item.display_name]),
+  );
 
   return Object.freeze({
     renderChannelPost(media) {
@@ -153,6 +158,10 @@ export function createTelegramService({
       }
 
       const text = this.renderChannelPost(media);
+      const file = await db
+        .prepare("SELECT tg_file_id FROM media_files WHERE media_id = ?")
+        .bind(media.id)
+        .first();
       const existing = await db
         .prepare("SELECT tg_message_id FROM channel_posts WHERE media_id = ?")
         .bind(media.id)
@@ -160,12 +169,12 @@ export function createTelegramService({
       const timestamp = new Date().toISOString();
 
       if (existing) {
+        const method = file ? "editMessageCaption" : "editMessageText";
+        const payload = file
+          ? { chat_id: channelId, message_id: existing.tg_message_id, caption: text }
+          : { chat_id: channelId, message_id: existing.tg_message_id, text };
         try {
-          await this.callTelegram(env, "editMessageText", {
-            chat_id: channelId,
-            message_id: existing.tg_message_id,
-            text,
-          });
+          await this.callTelegram(env, method, payload);
         } catch (error) {
           // Telegram rejects edits that leave the message unchanged; that
           // still counts as the channel being up to date.
@@ -186,10 +195,16 @@ export function createTelegramService({
         };
       }
 
-      const sent = await this.callTelegram(env, "sendMessage", {
-        chat_id: channelId,
-        text,
-      });
+      const sent = file
+        ? await this.callTelegram(env, "sendVideo", {
+            chat_id: channelId,
+            video: file.tg_file_id,
+            caption: text,
+          })
+        : await this.callTelegram(env, "sendMessage", {
+            chat_id: channelId,
+            text,
+          });
       await db
         .prepare(
           `INSERT INTO channel_posts (
@@ -206,7 +221,129 @@ export function createTelegramService({
           timestamp,
         )
         .run();
-      return { published: true, outcome: "created", tg_message_id: sent.message_id };
+      return {
+        published: true,
+        outcome: "created",
+        kind: file ? "video" : "text",
+        tg_message_id: sent.message_id,
+      };
+    },
+
+    async refreshPinnedIndex(db, env) {
+      const channelId = env.TELEGRAM_CHANNEL_ID;
+      if (!channelId) {
+        throw new Error("TELEGRAM_CHANNEL_ID is not configured");
+      }
+
+      const [categoryRows, actorRows, tagRows] = await db.batch([
+        db.prepare(`
+          SELECT m.category_id, COUNT(*) AS media_count
+          FROM media m
+          JOIN channel_posts c ON c.media_id = m.id
+          WHERE m.status = 'approved' AND m.category_id IS NOT NULL
+          GROUP BY m.category_id
+        `),
+        db.prepare(`
+          SELECT DISTINCT a.display_name_snapshot AS display_name
+          FROM media_actors a
+          JOIN channel_posts c ON c.media_id = a.media_id
+          JOIN media m ON m.id = a.media_id
+          WHERE m.status = 'approved' AND a.display_enabled = 1
+          ORDER BY a.display_name_snapshot
+        `),
+        db.prepare(`
+          SELECT a.display_name_snapshot AS display_name, MAX(a.weight) AS weight
+          FROM media_tags a
+          JOIN channel_posts c ON c.media_id = a.media_id
+          JOIN media m ON m.id = a.media_id
+          WHERE m.status = 'approved' AND a.display_enabled = 1
+          GROUP BY a.display_name_snapshot
+          ORDER BY weight DESC, a.display_name_snapshot
+        `),
+      ]);
+
+      const text = this.renderPinnedIndex({
+        categories: categoryRows.results ?? [],
+        actors: actorRows.results ?? [],
+        tags: tagRows.results ?? [],
+      });
+
+      const existing = await db
+        .prepare("SELECT value FROM database_metadata WHERE key = ?")
+        .bind("channel_pinned_index_message_id")
+        .first();
+      const timestamp = new Date().toISOString();
+
+      if (existing) {
+        const messageId = Number(existing.value);
+        try {
+          await this.callTelegram(env, "editMessageText", {
+            chat_id: channelId,
+            message_id: messageId,
+            text,
+          });
+          return { outcome: "edited", tg_message_id: messageId };
+        } catch (error) {
+          if (String(error.message).includes("message is not modified")) {
+            return { outcome: "unchanged", tg_message_id: messageId };
+          }
+          // Fall through and repost when the stored message no longer exists.
+          if (!String(error.message).includes("message to edit not found")) {
+            throw error;
+          }
+        }
+      }
+
+      const sent = await this.callTelegram(env, "sendMessage", {
+        chat_id: channelId,
+        text,
+      });
+      await this.callTelegram(env, "pinChatMessage", {
+        chat_id: channelId,
+        message_id: sent.message_id,
+        disable_notification: true,
+      });
+      await db
+        .prepare(
+          `INSERT INTO database_metadata (key, value, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT (key) DO UPDATE SET
+             value = excluded.value, updated_at = excluded.updated_at`,
+        )
+        .bind("channel_pinned_index_message_id", String(sent.message_id), timestamp)
+        .run();
+      return { outcome: "pinned", tg_message_id: sent.message_id };
+    },
+
+    renderPinnedIndex({ categories, actors, tags }) {
+      const categoryTags = categories
+        .map((row) => {
+          const display = categoryDisplayNames.get(row.category_id);
+          if (!display) {
+            return null;
+          }
+          const tag = hashtag(display, channelIndex.category_prefix);
+          return tag ? `${tag} (${row.media_count})` : null;
+        })
+        .filter(Boolean);
+      const actorTags = actors
+        .map((row) => hashtag(row.display_name, channelIndex.actor_prefix))
+        .filter(Boolean);
+      const typeTags = tags
+        .map((row) => hashtag(row.display_name, channelIndex.tag_prefix))
+        .filter(Boolean);
+
+      let text = channelIndex.template
+        .replaceAll("{{category_tags}}", categoryTags.join(" "))
+        .replaceAll("{{actor_tags}}", actorTags.join(" "))
+        .replaceAll("{{type_tags}}", typeTags.join(" "));
+      text = text.replace(/\n{3,}/gu, "\n\n").trim();
+
+      // Telegram message limit; keep a safety margin for future growth.
+      if (text.length > 4000) {
+        text = `${text.slice(0, 3990)}\n…`;
+      }
+      return text;
     },
 
     async callTelegram(env, method, payload) {
