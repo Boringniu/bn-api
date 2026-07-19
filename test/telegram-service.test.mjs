@@ -238,6 +238,149 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   assert.equal(telegramCalls[0].body.message_id, 55);
 });
 
+test("channel video post is ingested and gets a hashtag caption", async () => {
+  const ingestCalls = [];
+  const telegramCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(db, payload) {
+        ingestCalls.push(payload);
+        return {
+          id: "media_new",
+          status: "approved",
+          category: { category_id: "cat_japan", display_name: "日本" },
+          actors: [{ actor_id: "actor_000001", display_name: "希岛爱理" }],
+          tags: [],
+        };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: {} }) };
+    },
+  });
+  const db = new FakeD1();
+
+  const result = await service.handleUpdate(
+    db,
+    {
+      channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 99,
+        caption: "ABP-123 希島あいり",
+        video: { file_id: "VIDFILE", file_name: "ABP-123.mp4" },
+      },
+    },
+    {
+      TELEGRAM_BOT_TOKEN: "bot-token",
+      TELEGRAM_CHANNEL_ID: "-1004460339207",
+    },
+  );
+
+  assert.equal(result.ingested, "media_new");
+  assert.equal(ingestCalls[0].code, "ABP-123");
+  assert.equal(ingestCalls[0].source.provider, "channel");
+  assert.equal(ingestCalls[0].metadata.tg_file_id, "VIDFILE");
+  assert.ok(
+    db.statements.some((s) => s.sql.includes("INSERT INTO media_files")),
+  );
+  assert.ok(
+    db.statements.some((s) => s.sql.includes("INSERT INTO channel_posts")),
+  );
+  const captionCall = telegramCalls.find((c) => c.url.includes("editMessageCaption"));
+  assert.ok(captionCall.body.caption.startsWith("ABP-123 希島あいり"));
+  assert.ok(captionCall.body.caption.includes("#希岛爱理"));
+});
+
+test("channel posts from other chats and non-videos are ignored", async () => {
+  const service = createService();
+  const env = { TELEGRAM_CHANNEL_ID: "-1004460339207" };
+
+  assert.equal(
+    await service.handleUpdate(new FakeD1(), {
+      channel_post: { chat: { id: -999 }, message_id: 1, video: { file_id: "x" } },
+    }, env),
+    null,
+  );
+  assert.equal(
+    await service.handleUpdate(new FakeD1(), {
+      channel_post: { chat: { id: -1004460339207 }, message_id: 2, text: "hello" },
+    }, env),
+    null,
+  );
+});
+
+test("reconcileChannel removes rows whose messages were deleted", async () => {
+  const telegramCalls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      const body = JSON.parse(init.body);
+      telegramCalls.push({ url, body });
+      if (url.includes("copyMessage") && body.message_id === 11) {
+        return {
+          json: async () => ({ ok: false, description: "Bad Request: message to copy not found" }),
+        };
+      }
+      return { json: async () => ({ ok: true, result: { message_id: 500 } }) };
+    },
+  });
+  const db = new FakeD1({
+    allResults: [
+      [
+        { media_id: "media_kept", tg_message_id: 10 },
+        { media_id: "media_gone", tg_message_id: 11 },
+      ],
+    ],
+  });
+
+  const result = await service.reconcileChannel(db, {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_CHANNEL_ID: "-100",
+  });
+
+  assert.equal(result.checked, 2);
+  assert.deepEqual(result.removed, [
+    { media_id: "media_gone", tg_message_id: 11 },
+  ]);
+  const deletes = db.statements.filter((s) =>
+    s.sql.includes("DELETE FROM media WHERE id = ?"),
+  );
+  assert.equal(deletes.length, 1);
+  assert.deepEqual(deletes[0].values, ["media_gone"]);
+});
+
+test("publishToChannel reposts when the tracked message was deleted", async () => {
+  const telegramCalls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      if (url.includes("editMessageText")) {
+        return {
+          json: async () => ({ ok: false, description: "Bad Request: message to edit not found" }),
+        };
+      }
+      return { json: async () => ({ ok: true, result: { message_id: 77 } }) };
+    },
+  });
+  const db = new FakeD1({ firstResults: [null, { tg_message_id: 3 }] });
+
+  const result = await service.publishToChannel(db, sampleMedia, {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_CHANNEL_ID: "-100",
+  });
+
+  assert.equal(result.outcome, "created");
+  assert.equal(result.tg_message_id, 77);
+  assert.ok(
+    db.statements.some((s) => s.sql.includes("DELETE FROM channel_posts")),
+  );
+});
+
 function createSearchStub({ resolution = null, media = [] } = {}) {
   return {
     resolveQuery(query) {
@@ -256,10 +399,16 @@ function createSearchStub({ resolution = null, media = [] } = {}) {
 }
 
 class FakeD1 {
-  constructor({ existing = null, firstResults = null, batchResults = null } = {}) {
+  constructor({
+    existing = null,
+    firstResults = null,
+    batchResults = null,
+    allResults = null,
+  } = {}) {
     this.existing = existing;
     this.firstResults = firstResults;
     this.batchResults = batchResults;
+    this.allResults = allResults;
     this.statements = [];
   }
 
@@ -282,6 +431,13 @@ class FakeD1 {
       async run() {
         db.statements.push(this);
         return { success: true };
+      },
+      async all() {
+        db.statements.push(this);
+        if (db.allResults) {
+          return { results: db.allResults.shift() ?? [] };
+        }
+        return { results: [] };
       },
     };
   }

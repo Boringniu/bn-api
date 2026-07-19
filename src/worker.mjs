@@ -64,6 +64,7 @@ const app = createWorkerApp({
   telegramService: createTelegramService({
     categoryConfig,
     displayConfig,
+    ingestService,
     searchConfig,
     searchService,
     versionConfig,

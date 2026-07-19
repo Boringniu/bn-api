@@ -125,6 +125,17 @@ export function createWorkerApp({
           return jsonResponse({ data: result }, 200, requestId);
         }
 
+        if (request.method === "POST" && url.pathname === "/v1/channel/reconcile") {
+          assertAuthorized(request, env);
+          assertDb(env);
+          const keep = url.searchParams.get("keep_media") === "1";
+          const result = await telegramService.reconcileChannel(env.DB, env, {
+            deleteMedia: !keep,
+          });
+          const index = await telegramService.refreshPinnedIndex(env.DB, env);
+          return jsonResponse({ data: { ...result, index } }, 200, requestId);
+        }
+
         if (request.method === "POST" && url.pathname === "/v1/media") {
           assertAuthorized(request, env);
           assertJsonRequest(request);

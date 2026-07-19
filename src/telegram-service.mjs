@@ -5,6 +5,7 @@ const TELEGRAM_API = "https://api.telegram.org";
 export function createTelegramService({
   categoryConfig,
   displayConfig,
+  ingestService = null,
   searchConfig,
   searchService,
   versionConfig,
@@ -104,6 +105,9 @@ export function createTelegramService({
     },
 
     async handleUpdate(db, update, env) {
+      if (update?.channel_post) {
+        return this.handleChannelPost(db, update.channel_post, env);
+      }
       const message = update?.message;
       const text = message?.text?.trim();
       if (!message || !text) {
@@ -148,6 +152,183 @@ export function createTelegramService({
       return { chat_id: chatId, replied: true };
     },
 
+    // A video posted (or forwarded) into the channel becomes the source of
+    // truth: ingest it through the normal pipeline, remember its file_id and
+    // message id, and append the hashtag line to its caption so the pinned
+    // index can reach it.
+    async handleChannelPost(db, post, env) {
+      const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
+      if (String(post.chat?.id ?? "") !== channelId) {
+        return null;
+      }
+      const video = post.video ?? post.document;
+      if (!video || !ingestService) {
+        return null;
+      }
+
+      const rawText = (post.caption ?? "").trim();
+      const fileName = (video.file_name ?? "").replace(
+        /\.(mp4|mkv|avi|wmv|ts)$/iu,
+        "",
+      );
+      const title = rawText || fileName || `视频 ${post.message_id}`;
+      const codeMatch = title.match(/([A-Za-z]{2,10})[-_ ]?(\d{2,6})/u);
+      const tokens = title
+        .split(/\s+/u)
+        .filter((token) => token && !/^[A-Za-z]{2,10}[-_ ]?\d{2,6}$/u.test(token));
+
+      const payload = {
+        source: {
+          provider: "channel",
+          external_id: `${channelId}:${post.message_id}`,
+        },
+        title,
+        raw_tags: tokens.length > 0 ? tokens : ["未分类"],
+        metadata: {
+          tg_file_id: video.file_id,
+          tg_message_id: String(post.message_id),
+        },
+      };
+      if (codeMatch) {
+        payload.code = `${codeMatch[1]}-${codeMatch[2]}`;
+      }
+
+      const result = await ingestService.ingest(db, payload);
+      const timestamp = new Date().toISOString();
+      await db
+        .prepare(
+          `INSERT INTO media_files (
+             media_id, tg_file_id, source_chat_id, source_message_id,
+             imported_from, created_at
+           ) VALUES (?, ?, ?, ?, 'channel', ?)
+           ON CONFLICT (media_id) DO UPDATE SET
+             tg_file_id = excluded.tg_file_id,
+             source_chat_id = excluded.source_chat_id,
+             source_message_id = excluded.source_message_id`,
+        )
+        .bind(result.id, video.file_id, channelId, String(post.message_id), timestamp)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO channel_posts (
+             media_id, tg_chat_id, tg_message_id, template_version,
+             posted_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (media_id) DO UPDATE SET
+             tg_message_id = excluded.tg_message_id,
+             updated_at = excluded.updated_at`,
+        )
+        .bind(
+          result.id,
+          channelId,
+          post.message_id,
+          versionConfig.release.version,
+          timestamp,
+          timestamp,
+        )
+        .run();
+
+      // Rewrite the caption with the standard hashtag block when the media
+      // is approved; leave the original caption alone otherwise.
+      if (result.status === "approved") {
+        const media = {
+          id: result.id,
+          category: result.category
+            ? {
+                category_id: result.category.category_id,
+                display_name: result.category.display_name,
+              }
+            : null,
+          actors: result.actors ?? [],
+          tags: result.tags ?? [],
+        };
+        const hashtagBlock = this.renderChannelPost(media);
+        const caption = rawText
+          ? `${rawText}\n\n${hashtagBlock}`
+          : hashtagBlock;
+        try {
+          await this.callTelegram(env, "editMessageCaption", {
+            chat_id: channelId,
+            message_id: post.message_id,
+            caption: caption.slice(0, 1024),
+          });
+        } catch (error) {
+          if (!String(error.message).includes("message is not modified")) {
+            console.warn("caption update failed", {
+              message: error.message,
+              messageId: post.message_id,
+            });
+          }
+        }
+      }
+
+      return { ingested: result.id, status: result.status };
+    },
+
+    // Compare channel_posts against the live channel and drop rows whose
+    // message has been deleted by hand; cascade-remove the media so search
+    // and the pinned index stay honest.
+    async reconcileChannel(db, env, { deleteMedia = true } = {}) {
+      const channelId = env.TELEGRAM_CHANNEL_ID;
+      if (!channelId) {
+        throw new Error("TELEGRAM_CHANNEL_ID is not configured");
+      }
+      const rows = (
+        await db
+          .prepare(
+            "SELECT media_id, tg_message_id FROM channel_posts ORDER BY tg_message_id",
+          )
+          .all()
+      ).results ?? [];
+
+      const missing = [];
+      for (const row of rows) {
+        // forwardMessage to the channel itself is the cheapest existence
+        // probe Telegram offers; copyMessage avoids the "forwarded from"
+        // header and can be deleted immediately.
+        try {
+          const copied = await this.callTelegram(env, "copyMessage", {
+            chat_id: channelId,
+            from_chat_id: channelId,
+            message_id: row.tg_message_id,
+            disable_notification: true,
+          });
+          await this.callTelegram(env, "deleteMessage", {
+            chat_id: channelId,
+            message_id: copied.message_id,
+          });
+        } catch (error) {
+          if (/message to copy not found|MESSAGE_ID_INVALID/iu.test(error.message)) {
+            missing.push(row);
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      for (const row of missing) {
+        if (deleteMedia) {
+          await db
+            .prepare("DELETE FROM media WHERE id = ?")
+            .bind(row.media_id)
+            .run();
+        } else {
+          await db
+            .prepare("DELETE FROM channel_posts WHERE media_id = ?")
+            .bind(row.media_id)
+            .run();
+        }
+      }
+
+      return {
+        checked: rows.length,
+        removed: missing.map((row) => ({
+          media_id: row.media_id,
+          tg_message_id: row.tg_message_id,
+        })),
+      };
+    },
+
     async publishToChannel(db, media, env) {
       if (!channelIndex.enabled) {
         return { published: false, reason: "channel_index_disabled" };
@@ -173,26 +354,39 @@ export function createTelegramService({
         const payload = file
           ? { chat_id: channelId, message_id: existing.tg_message_id, caption: text }
           : { chat_id: channelId, message_id: existing.tg_message_id, text };
+        let vanished = false;
         try {
           await this.callTelegram(env, method, payload);
         } catch (error) {
-          // Telegram rejects edits that leave the message unchanged; that
-          // still counts as the channel being up to date.
-          if (!String(error.message).includes("message is not modified")) {
+          if (String(error.message).includes("message is not modified")) {
+            // Telegram rejects edits that leave the message unchanged; that
+            // still counts as the channel being up to date.
+          } else if (
+            /message to edit not found|MESSAGE_ID_INVALID/iu.test(error.message)
+          ) {
+            // The message was deleted by hand; fall through and repost.
+            vanished = true;
+          } else {
             throw error;
           }
         }
+        if (!vanished) {
+          await db
+            .prepare(
+              "UPDATE channel_posts SET template_version = ?, updated_at = ? WHERE media_id = ?",
+            )
+            .bind(versionConfig.release.version, timestamp, media.id)
+            .run();
+          return {
+            published: true,
+            outcome: "edited",
+            tg_message_id: existing.tg_message_id,
+          };
+        }
         await db
-          .prepare(
-            "UPDATE channel_posts SET template_version = ?, updated_at = ? WHERE media_id = ?",
-          )
-          .bind(versionConfig.release.version, timestamp, media.id)
+          .prepare("DELETE FROM channel_posts WHERE media_id = ?")
+          .bind(media.id)
           .run();
-        return {
-          published: true,
-          outcome: "edited",
-          tg_message_id: existing.tg_message_id,
-        };
       }
 
       const sent = file
