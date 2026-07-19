@@ -1,8 +1,14 @@
 import { MediaInputError } from "./media-input.mjs";
+import { ReviewActionError } from "./review-service.mjs";
 
 const MAX_BODY_BYTES = 1_048_576;
 
-export function createWorkerApp({ ingestService, searchService, versionConfig }) {
+export function createWorkerApp({
+  ingestService,
+  reviewService,
+  searchService,
+  versionConfig,
+}) {
   return Object.freeze({
     async fetch(request, env) {
       const requestId =
@@ -44,6 +50,42 @@ export function createWorkerApp({ ingestService, searchService, versionConfig })
           return jsonResponse({ data: { prefixes } }, 200, requestId);
         }
 
+        if (request.method === "GET" && url.pathname === "/v1/review") {
+          const reviewer = assertReviewer(request, env);
+          assertDb(env);
+          const result = await reviewService.listQueue(env.DB, {
+            status: url.searchParams.get("status") ?? "pending",
+            type: url.searchParams.get("type") ?? undefined,
+            role: url.searchParams.get("role") ?? undefined,
+            page: Number(url.searchParams.get("page") ?? "1"),
+          });
+          return jsonResponse(
+            { data: { reviewer_role: reviewer.role, ...result } },
+            200,
+            requestId,
+          );
+        }
+
+        const reviewMatch = url.pathname.match(
+          /^\/v1\/review\/([A-Za-z0-9_-]+)\/action$/,
+        );
+        if (request.method === "POST" && reviewMatch) {
+          const reviewer = assertReviewer(request, env);
+          assertJsonRequest(request);
+          assertBodySize(request);
+          assertDb(env);
+          const payload = await readJson(request);
+          const result = await reviewService.applyAction(env.DB, reviewMatch[1], {
+            action: payload.action,
+            reviewerRole: reviewer.role,
+            reviewerId: payload.reviewer_id ?? reviewer.role,
+            notes: payload.notes,
+            target: payload.target,
+            edited_values: payload.edited_values,
+          });
+          return jsonResponse({ data: result }, 200, requestId);
+        }
+
         if (request.method === "POST" && url.pathname === "/v1/media") {
           assertAuthorized(request, env);
           assertJsonRequest(request);
@@ -75,6 +117,18 @@ export function createWorkerApp({ ingestService, searchService, versionConfig })
               },
             },
             400,
+            requestId,
+          );
+        }
+        if (error instanceof ReviewActionError) {
+          return jsonResponse(
+            {
+              error: {
+                code: error.code,
+                message: error.message,
+              },
+            },
+            error.status,
             requestId,
           );
         }
@@ -195,6 +249,24 @@ async function handleSearch(searchService, db, url) {
     pageSize,
   });
   return { query, resolution, ...result };
+}
+
+function assertReviewer(request, env) {
+  if (!env.REVIEW_TOKEN_EDITOR && !env.REVIEW_TOKEN_ADMIN) {
+    throw new HttpError(
+      503,
+      "review tokens are not configured",
+      "service_not_configured",
+    );
+  }
+  const authorization = request.headers.get("authorization");
+  if (env.REVIEW_TOKEN_ADMIN && authorization === `Bearer ${env.REVIEW_TOKEN_ADMIN}`) {
+    return { role: "admin" };
+  }
+  if (env.REVIEW_TOKEN_EDITOR && authorization === `Bearer ${env.REVIEW_TOKEN_EDITOR}`) {
+    return { role: "editor" };
+  }
+  throw new HttpError(401, "invalid bearer token", "unauthorized");
 }
 
 function assertDb(env) {

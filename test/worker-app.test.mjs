@@ -219,6 +219,77 @@ test("serves media detail and code prefixes", async () => {
   ]);
 });
 
+test("review queue distinguishes editor and admin tokens", async () => {
+  const reviewService = createReviewStub();
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService,
+    searchService: createSearchStub(),
+    versionConfig,
+  });
+  const env = {
+    DB: {},
+    REVIEW_TOKEN_EDITOR: "editor-secret",
+    REVIEW_TOKEN_ADMIN: "admin-secret",
+  };
+
+  const unauthorized = await app.fetch(
+    new Request("https://api.example.com/v1/review"),
+    env,
+  );
+  assert.equal(unauthorized.status, 401);
+
+  const asAdmin = await app.fetch(
+    new Request("https://api.example.com/v1/review", {
+      headers: { authorization: "Bearer admin-secret" },
+    }),
+    env,
+  );
+  assert.equal(asAdmin.status, 200);
+  assert.equal((await asAdmin.json()).data.reviewer_role, "admin");
+});
+
+test("review action passes the authenticated role, not a client claim", async () => {
+  const reviewService = createReviewStub();
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService,
+    searchService: createSearchStub(),
+    versionConfig,
+  });
+  const response = await app.fetch(
+    new Request("https://api.example.com/v1/review/review_1/action", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer editor-secret",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ action: "approve", reviewerRole: "admin" }),
+    }),
+    {
+      DB: {},
+      REVIEW_TOKEN_EDITOR: "editor-secret",
+      REVIEW_TOKEN_ADMIN: "admin-secret",
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(reviewService.actionCalls[0].options.reviewerRole, "editor");
+});
+
+function createReviewStub() {
+  return {
+    actionCalls: [],
+    async listQueue() {
+      return { page: 1, page_size: 20, total: 0, results: [] };
+    },
+    async applyAction(db, id, options) {
+      this.actionCalls.push({ id, options });
+      return { id, status: "approved", resolution: {} };
+    },
+  };
+}
+
 function createSearchStub({
   resolution = { type: "tag", match: "exact_alias", tag_id: "tag_wife" },
   media = null,

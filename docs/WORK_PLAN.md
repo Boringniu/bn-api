@@ -26,15 +26,16 @@ https://bn-api.niu900326.workers.dev ，冒烟验证通过。旧库 `bn2`（空�
 公开结果仅 approved；忽略词返回空；模糊匹配 Levenshtein ≤2。
 遗留优化：演员/标签按名称的 D1 级搜索索引（当前走内存字典已够用）。
 
-## 阶段三：审核后台 API
+## 阶段三：审核后台 API（已完成 2026-07-19）
 
-review_items 表已有数据流入口，缺处理出口：
-
-1. `GET /v1/review` — 按 status、type、required_reviewer_role 过滤的队列列表。
-2. `POST /v1/review/:id/action` — 实现 review_rules.json 的七个动作（approve/reject/ignore/merge/deprecate/edit/link_existing）。
-3. 鉴权：区分 editor 与 admin 角色（review_rules 中 pending_category 仅 admin）。
-4. approve/merge 的产物是"待回写 GitHub 的配置变更建议"，不直接改配置——生成结构化 diff 或 PR 草稿内容，由人工提交 PR，符合标准 §十五。
-5. 审核完成后触发受影响 media 的重新标准化标记（存 rule_version 对比即可，重索引可延后）。
+已实现并线上验证：`GET /v1/review`（按 status/type/role 过滤分页）、
+`POST /v1/review/:id/action`（七个动作全通）。角色鉴权用两个独立
+Bearer secret（REVIEW_TOKEN_EDITOR / REVIEW_TOKEN_ADMIN，值在本地
+`.dev.vars`），角色由 token 决定、不信客户端声明；editor 审 admin 级
+返回 403，重复审核返回 409。approve/merge/deprecate/edit/link_existing
+生成 `config_proposal`（标记 requires_pull_request，注明目标配置文件和
+建议改动）存入 resolution_json，由人工提 PR 落地，符合标准 §十五。
+遗留：受影响 media 的重新标准化标记（并入阶段五的重索引）。
 
 ## 阶段四：Telegram Bot 与频道
 
