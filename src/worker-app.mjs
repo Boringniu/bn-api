@@ -2,7 +2,7 @@ import { MediaInputError } from "./media-input.mjs";
 
 const MAX_BODY_BYTES = 1_048_576;
 
-export function createWorkerApp({ ingestService, versionConfig }) {
+export function createWorkerApp({ ingestService, searchService, versionConfig }) {
   return Object.freeze({
     async fetch(request, env) {
       const requestId =
@@ -22,13 +22,33 @@ export function createWorkerApp({ ingestService, versionConfig }) {
           );
         }
 
+        if (request.method === "GET" && url.pathname === "/v1/search") {
+          assertDb(env);
+          const result = await handleSearch(searchService, env.DB, url);
+          return jsonResponse({ data: result }, 200, requestId);
+        }
+
+        const mediaMatch = url.pathname.match(/^\/v1\/media\/([a-z0-9_]+)$/);
+        if (request.method === "GET" && mediaMatch) {
+          assertDb(env);
+          const media = await searchService.getMedia(env.DB, mediaMatch[1]);
+          if (!media) {
+            throw new HttpError(404, "media not found", "media_not_found");
+          }
+          return jsonResponse({ data: media }, 200, requestId);
+        }
+
+        if (request.method === "GET" && url.pathname === "/v1/codes") {
+          assertDb(env);
+          const prefixes = await searchService.listCodePrefixes(env.DB);
+          return jsonResponse({ data: { prefixes } }, 200, requestId);
+        }
+
         if (request.method === "POST" && url.pathname === "/v1/media") {
           assertAuthorized(request, env);
           assertJsonRequest(request);
           assertBodySize(request);
-          if (!env.DB) {
-            throw new HttpError(503, "database binding DB is not configured");
-          }
+          assertDb(env);
 
           const payload = await readJson(request);
           const result = await ingestService.ingest(env.DB, payload);
@@ -97,6 +117,89 @@ class HttpError extends Error {
     this.name = "HttpError";
     this.status = status;
     this.code = code;
+  }
+}
+
+const SEARCH_FILTER_KEYS = new Set([
+  "category_id",
+  "actor_id",
+  "tag_id",
+  "code",
+  "subtitle",
+  "year",
+]);
+
+async function handleSearch(searchService, db, url) {
+  const params = url.searchParams;
+  const filters = {};
+  let appliedFilters = 0;
+
+  for (const key of SEARCH_FILTER_KEYS) {
+    const value = params.get(key);
+    if (value === null) {
+      continue;
+    }
+    appliedFilters += 1;
+    if (key === "subtitle") {
+      filters.subtitle = value === "1" || value === "true";
+    } else if (key === "year") {
+      const year = Number(value);
+      if (!Number.isInteger(year)) {
+        throw new HttpError(400, "year must be an integer", "invalid_filter");
+      }
+      filters.year = year;
+    } else {
+      filters[key] = value;
+    }
+  }
+  if (appliedFilters > 5) {
+    throw new HttpError(400, "too many filters (max 5)", "invalid_filter");
+  }
+
+  let resolution = null;
+  const query = params.get("q");
+  if (query !== null) {
+    const resolved = searchService.resolveQuery(query);
+    resolution = resolved.resolution;
+    if (!resolution) {
+      return {
+        query,
+        resolution: null,
+        page: 1,
+        page_size: 0,
+        total: 0,
+        results: [],
+      };
+    }
+    if (resolution.type === "code") {
+      filters.code = resolution.code;
+    } else if (resolution.type === "code_prefix") {
+      filters.code_prefix = resolution.prefix;
+    } else if (resolution.type === "actor") {
+      filters.actor_id = resolution.actor_id;
+    } else if (resolution.type === "tag") {
+      filters.tag_id = resolution.tag_id;
+    } else if (resolution.type === "category") {
+      filters.category_id = resolution.category_id;
+    }
+  }
+
+  const page = Number(params.get("page") ?? "1");
+  const pageSize = params.get("page_size")
+    ? Number(params.get("page_size"))
+    : undefined;
+
+  const result = await searchService.findMedia(db, {
+    filters,
+    page: Number.isInteger(page) ? page : 1,
+    pageSize,
+  });
+  return { query, resolution, ...result };
+}
+
+function assertDb(env) {
+  if (!env.DB) {
+    throw new HttpError(503, "database binding DB is not configured");
   }
 }
 

@@ -16,6 +16,7 @@ import versionConfig from "../config/version.json" with { type: "json" };
 import { createActorNormalizer } from "./actor-normalizer.mjs";
 import { createIngestService } from "./ingest-service.mjs";
 import { createMediaInputParser } from "./media-input.mjs";
+import { createSearchService } from "./search-service.mjs";
 import { createTagNormalizer } from "./tag-normalizer.mjs";
 import { createWorkerApp } from "./worker-app.mjs";
 
@@ -43,6 +44,15 @@ const ingestService = createIngestService({
 });
 const app = createWorkerApp({
   ingestService,
+  searchService: createSearchService({
+    actorDictionaryConfig,
+    aliasConfig,
+    categoryConfig,
+    ignoredConfig,
+    searchConfig,
+    tagDictionaryConfig,
+    versionConfig,
+  }),
   versionConfig,
 });
 

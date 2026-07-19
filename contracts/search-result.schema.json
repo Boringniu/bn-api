@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://boringniu.example/contracts/search-result.schema.json",
+  "title": "Boringniu public search response data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "page",
+    "page_size",
+    "total",
+    "results"
+  ],
+  "properties": {
+    "query": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resolution": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "type",
+        "match"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "code",
+            "code_prefix",
+            "actor",
+            "tag",
+            "category"
+          ]
+        },
+        "match": {
+          "enum": [
+            "exact_code",
+            "exact_alias",
+            "normalized",
+            "prefix",
+            "fuzzy"
+          ]
+        }
+      }
+    },
+    "page": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "page_size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 200
+    },
+    "results": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/publicMedia"
+      }
+    }
+  },
+  "$defs": {
+    "publicMedia": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "code",
+        "release_date",
+        "year",
+        "subtitle",
+        "category",
+        "actors",
+        "tags"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^media_[a-z0-9]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "release_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "year": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "subtitle": {
+          "type": "boolean"
+        },
+        "category": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "category_id",
+            "display_name"
+          ],
+          "properties": {
+            "category_id": {
+              "type": "string",
+              "pattern": "^cat_[a-z0-9_]+$"
+            },
+            "display_name": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "actors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "actor_id",
+              "display_name"
+            ],
+            "properties": {
+              "actor_id": {
+                "type": "string",
+                "pattern": "^actor_[0-9]{6,}$"
+              },
+              "display_name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tag_id",
+              "display_name"
+            ],
+            "properties": {
+              "tag_id": {
+                "type": "string",
+                "pattern": "^tag_[a-z0-9_]+$"
+              },
+              "display_name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
