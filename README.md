@@ -11,6 +11,8 @@ Boringniuniu 影视库的唯一规则配置中心。分类、标签、演员名�
 - Worker 与 Bot 只读取已通过校验的配置并执行。
 - AI 只能向审核队列提交建议，不能直接创建、批准或修改规则。
 
+配套文档：[配置指南](docs/CONFIG_GUIDE.md) · [审核指南](docs/REVIEW_GUIDE.md) · [命名指南](docs/NAMING_GUIDE.md) · [变更日志](docs/CHANGELOG.md)
+
 ## 目录
 
 | 路径 | 作用 |
@@ -36,11 +38,12 @@ npm run check
 
 `npm run check` 依次执行：
 
-1. `npm run validate`：校验 JSON Schema、ID 唯一性、规范化值、版本声明、跨配置上限和正则表达式。
+1. `npm run validate`：校验 JSON Schema、ID 唯一性、规范化值、版本声明、跨配置上限、正则表达式、固定五分类、演员中文名唯一性、regex Alias 测试样例和 JSON 规范格式。
 2. `npm run check:aliases`：检查别名重复、一个别名指向多个目标、忽略词冲突和全局别名目标引用。
-3. `npm test`：验证标签、演员和番号归一化，以及媒体入库与 Worker 接口行为。
-4. `npm run build:manifest`：生成包含版本、文件大小和 SHA-256 的 `dist/config-manifest.json`。
-5. `npm run build:worker`：执行 Wrangler dry-run，确认 Worker 可以打包并识别 D1 binding。
+3. `npm run check:versions`：对比 `origin/main`，配置内容变更必须升版本，版本不得回退（无基线时自动跳过）。
+4. `npm test`：验证文本标准化、标签、演员和番号归一化，以及媒体入库与 Worker 接口行为。
+5. `npm run build:manifest`：生成包含版本、文件大小和 SHA-256 的 `dist/config-manifest.json`。
+6. `npm run build:worker`：执行 Wrangler dry-run，确认 Worker 可以打包并识别 D1 binding。
 
 ## 标签规范化
 
@@ -65,7 +68,7 @@ printf '%s\n' '{"raw_tags":["日本成人","CHS","电影"]}' | npm run normalize
 1. 未知标签、演员、别名或分类进入审核队列，不允许 AI 自动创建或自动批准。
 2. 修改配置时同步更新该文件的 `config_version`、`updated_at` 和 `updated_by`。
 3. 同步更新 `config/version.json` 的发布版本、日期和 `files` 中对应版本。
-4. `normalized_value` 和 `normalized_aliases` 使用 NFKC、去除首尾空白、合并连续空白并转小写后的结果。
+4. `normalized_value` 和 `normalized_aliases` 使用 NFKC、分隔符（`-`、`_`、`.`、`/`）统一为空格、去除首尾空白、合并连续空白并转小写后的结果。
 5. 新增或修改字段时，必须同时更新同名 Schema。
 6. 提交前运行 `npm run check`；主分支合并由 CI 结果保护。
 

@@ -7,6 +7,7 @@
   "scripts": {
     "validate": "node scripts/validate-config.mjs",
     "check:aliases": "node scripts/check-duplicate-alias.mjs",
+    "check:versions": "node scripts/check-version-monotonic.mjs",
     "test": "node --test",
     "normalize:tags": "node scripts/normalize-tags.mjs",
     "build:manifest": "node scripts/build-config-manifest.mjs",
@@ -16,7 +17,7 @@
     "db:migrate:local": "wrangler d1 migrations apply bn-media --local",
     "db:migrate:remote": "wrangler d1 migrations apply bn-media --remote",
     "deploy": "wrangler deploy",
-    "check": "npm run validate && npm run check:aliases && npm test && npm run build:manifest && npm run build:worker"
+    "check": "npm run validate && npm run check:aliases && npm run check:versions && npm test && npm run build:manifest && npm run build:worker"
   },
   "engines": {
     "node": ">=22"

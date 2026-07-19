@@ -72,6 +72,10 @@ checkNormalizedValues();
 checkVersionConsistency();
 checkCrossConfigLimits();
 checkRegularExpressions();
+checkFixedCategories();
+checkActorDisplayNames();
+checkRegexAliasTestCases();
+checkCanonicalFormatting();
 
 if (failures.length > 0) {
   printFailures("Configuration validation failed", failures);
@@ -152,6 +156,9 @@ function checkNormalizedValues() {
     for (const [itemIndex, item] of (
       configs.get(configName)?.data.items ?? []
     ).entries()) {
+      if (item.match_mode === "regex") {
+        continue;
+      }
       const sourceField = configName === "alias" ? "raw_value" : "value";
       const expected = normalizeAlias(item[sourceField]);
       if (item.normalized_value !== expected) {
@@ -276,6 +283,107 @@ function checkRegularExpressions() {
       new RegExp(pattern, "u");
     } catch (error) {
       failures.push(`${path}: invalid regular expression (${error.message})`);
+    }
+  }
+}
+
+function checkFixedCategories() {
+  const fixedCategories = new Map([
+    ["cat_japan", "日本"],
+    ["cat_western", "欧美"],
+    ["cat_china", "国产"],
+    ["cat_selfshot", "自拍"],
+    ["cat_ai_drama", "AI短剧"],
+  ]);
+
+  const items = configs.get("category")?.data.items ?? [];
+  const seenIds = new Set();
+
+  for (const [index, category] of items.entries()) {
+    const expectedName = fixedCategories.get(category.category_id);
+    if (expectedName === undefined) {
+      failures.push(
+        `config/category.json/items/${index}: category_id "${category.category_id}" is not one of the five fixed categories`,
+      );
+      continue;
+    }
+    seenIds.add(category.category_id);
+    if (category.display_name !== expectedName) {
+      failures.push(
+        `config/category.json/items/${index}: display_name must be "${expectedName}" for ${category.category_id}`,
+      );
+    }
+    if (category.status !== "approved") {
+      failures.push(
+        `config/category.json/items/${index}: fixed category ${category.category_id} must remain approved`,
+      );
+    }
+  }
+
+  for (const categoryId of fixedCategories.keys()) {
+    if (!seenIds.has(categoryId)) {
+      failures.push(`config/category.json: missing fixed category "${categoryId}"`);
+    }
+  }
+}
+
+function checkActorDisplayNames() {
+  const seen = new Map();
+  for (const [index, actor] of (
+    configs.get("actor_dictionary")?.data.items ?? []
+  ).entries()) {
+    const name = actor.display_name_zh_cn;
+    if (seen.has(name)) {
+      failures.push(
+        `config/actor_dictionary.json/items/${index}: duplicate display_name_zh_cn "${name}" (also used by ${seen.get(name)})`,
+      );
+    } else {
+      seen.set(name, actor.actor_id);
+    }
+  }
+}
+
+function checkRegexAliasTestCases() {
+  for (const [index, alias] of (
+    configs.get("alias")?.data.items ?? []
+  ).entries()) {
+    if (alias.match_mode !== "regex") {
+      continue;
+    }
+
+    const source = `config/alias.json/items/${index}`;
+    if (!Array.isArray(alias.test_cases) || alias.test_cases.length === 0) {
+      failures.push(`${source}: regex alias requires at least one test case`);
+      continue;
+    }
+
+    let pattern;
+    try {
+      pattern = new RegExp(alias.raw_value, "u");
+    } catch {
+      continue;
+    }
+
+    for (const [caseIndex, testCase] of alias.test_cases.entries()) {
+      const matched = pattern.test(testCase.input);
+      if (matched !== testCase.should_match) {
+        failures.push(
+          `${source}/test_cases/${caseIndex}: input "${testCase.input}" expected should_match=${testCase.should_match}, got ${matched}`,
+        );
+      }
+    }
+  }
+}
+
+function checkCanonicalFormatting() {
+  for (const collection of [configs, schemas]) {
+    for (const { data, filePath, source } of collection.values()) {
+      const canonical = `${JSON.stringify(data, null, 2)}\n`;
+      if (source !== canonical) {
+        failures.push(
+          `${relativePath(filePath)}: not canonically formatted (2-space indent, trailing newline); reformat to keep diffs stable`,
+        );
+      }
     }
   }
 }
