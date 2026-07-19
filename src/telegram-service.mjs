@@ -169,31 +169,82 @@ export function createTelegramService({
         return null;
       }
 
+      // A copy the bot just made of an existing video arrives here as a
+      // fresh channel_post; remap the tracked message instead of ingesting
+      // a duplicate media row.
+      const known = await db
+        .prepare(
+          `SELECT media_id FROM media_files
+           WHERE tg_file_unique_id = ?1 OR tg_file_id = ?2
+           LIMIT 1`,
+        )
+        .bind(video.file_unique_id ?? "", video.file_id)
+        .first();
+      if (known) {
+        await db
+          .prepare(
+            `UPDATE channel_posts SET tg_message_id = ?, updated_at = ?
+             WHERE media_id = ?`,
+          )
+          .bind(post.message_id, new Date().toISOString(), known.media_id)
+          .run();
+        return { remapped: known.media_id };
+      }
+
       const rawText = (post.caption ?? "").trim();
       const fileName = (video.file_name ?? "").replace(
         /\.(mp4|mkv|avi|wmv|ts)$/iu,
         "",
       );
-      const title = rawText || fileName || `视频 ${post.message_id}`;
-      const codeMatch = title.match(/([A-Za-z]{2,10})[-_ ]?(\d{2,6})/u);
-      const tokens = title
-        .split(/\s+/u)
-        .filter((token) => token && !/^[A-Za-z]{2,10}[-_ ]?\d{2,6}$/u.test(token));
+      const parsed = parseChannelTitle(
+        rawText || fileName || `视频 ${post.message_id}`,
+      );
+      // Sentence fragments survive the syntactic filter. When the first
+      // line reads like a name list (no sentence punctuation), keep Han
+      // tokens for pending_actor review; when it reads like a sentence,
+      // keep only dictionary hits and kana tokens.
+      const sentenceLike = /[，。！？!?,；;～~…]/u.test(
+        (rawText || fileName).split(/\n/u)[0] ?? "",
+      );
+      const actors = parsed.actors.filter((token) => {
+        const { resolution } = searchService.resolveQuery(token);
+        if (resolution?.type === "actor") {
+          return true;
+        }
+        if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(token)) {
+          return true;
+        }
+        return !sentenceLike && token.length <= 8;
+      });
+
+      // The channel owner declares default tags for everything posted here
+      // (usually the category word); parsed hashtags take precedence.
+      const defaultTags = (env.TELEGRAM_CHANNEL_DEFAULT_TAGS ?? "")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+      const rawTags = [...new Set([...parsed.raw_tags, ...defaultTags])];
 
       const payload = {
         source: {
           provider: "channel",
           external_id: `${channelId}:${post.message_id}`,
         },
-        title,
-        raw_tags: tokens.length > 0 ? tokens : ["未分类"],
+        title: parsed.title,
+        raw_tags: rawTags.length > 0 ? rawTags : ["未分类"],
         metadata: {
           tg_file_id: video.file_id,
           tg_message_id: String(post.message_id),
         },
       };
-      if (codeMatch) {
-        payload.code = `${codeMatch[1]}-${codeMatch[2]}`;
+      if (actors.length > 0) {
+        payload.actors = actors;
+      }
+      if (parsed.description) {
+        payload.description = parsed.description;
+      }
+      if (parsed.code) {
+        payload.code = parsed.code;
       }
 
       const result = await ingestService.ingest(db, payload);
@@ -201,15 +252,23 @@ export function createTelegramService({
       await db
         .prepare(
           `INSERT INTO media_files (
-             media_id, tg_file_id, source_chat_id, source_message_id,
-             imported_from, created_at
-           ) VALUES (?, ?, ?, ?, 'channel', ?)
+             media_id, tg_file_id, tg_file_unique_id, source_chat_id,
+             source_message_id, imported_from, created_at
+           ) VALUES (?, ?, ?, ?, ?, 'channel', ?)
            ON CONFLICT (media_id) DO UPDATE SET
              tg_file_id = excluded.tg_file_id,
+             tg_file_unique_id = excluded.tg_file_unique_id,
              source_chat_id = excluded.source_chat_id,
              source_message_id = excluded.source_message_id`,
         )
-        .bind(result.id, video.file_id, channelId, String(post.message_id), timestamp)
+        .bind(
+          result.id,
+          video.file_id,
+          video.file_unique_id ?? null,
+          channelId,
+          String(post.message_id),
+          timestamp,
+        )
         .run();
       await db
         .prepare(
@@ -246,17 +305,29 @@ export function createTelegramService({
           tags: result.tags ?? [],
         };
         const hashtagBlock = this.renderChannelPost(media);
-        const caption = rawText
-          ? `${rawText}\n\n${hashtagBlock}`
-          : hashtagBlock;
+        const firstLine = rawText.split(/\n/u)[0] ?? "";
+        const caption = (firstLine
+          ? `${firstLine}\n\n${hashtagBlock}`
+          : hashtagBlock
+        ).slice(0, 1024);
         try {
           await this.callTelegram(env, "editMessageCaption", {
             chat_id: channelId,
             message_id: post.message_id,
-            caption: caption.slice(0, 1024),
+            caption,
           });
         } catch (error) {
-          if (!String(error.message).includes("message is not modified")) {
+          if (String(error.message).includes("message can't be edited")) {
+            // Forwarded messages cannot be edited by anyone. Replace the
+            // forward with a bot-owned copy that carries the caption, so
+            // pinned-index hashtags can reach the video.
+            await this.replaceWithCopy(db, env, {
+              caption,
+              channelId,
+              mediaId: result.id,
+              messageId: post.message_id,
+            });
+          } else if (!String(error.message).includes("message is not modified")) {
             console.warn("caption update failed", {
               message: error.message,
               messageId: post.message_id,
@@ -275,6 +346,36 @@ export function createTelegramService({
       }
 
       return { ingested: result.id, status: result.status };
+    },
+
+    async replaceWithCopy(db, env, { caption, channelId, mediaId, messageId }) {
+      try {
+        const copied = await this.callTelegram(env, "copyMessage", {
+          chat_id: channelId,
+          from_chat_id: channelId,
+          message_id: messageId,
+          caption,
+          disable_notification: true,
+        });
+        await this.callTelegram(env, "deleteMessage", {
+          chat_id: channelId,
+          message_id: messageId,
+        });
+        await db
+          .prepare(
+            `UPDATE channel_posts SET tg_message_id = ?, updated_at = ?
+             WHERE media_id = ?`,
+          )
+          .bind(copied.message_id, new Date().toISOString(), mediaId)
+          .run();
+        return copied.message_id;
+      } catch (error) {
+        console.warn("copy replacement failed", {
+          mediaId,
+          message: error.message,
+        });
+        return null;
+      }
     },
 
     // Compare channel_posts against the live channel and drop rows whose
@@ -663,6 +764,47 @@ export function createTelegramService({
       )
       .run();
   }
+}
+
+// Parse a channel caption or file name into ingest fields. The observed
+// format is "CODE #tag #tag 演员名｜演员名" on the first line with free
+// description text below. Codes require a real separator or an all-caps
+// prefix so runs like "Join_file_034356268" or "Pu229每日更新" never match.
+export function parseChannelTitle(rawTitle) {
+  const title = rawTitle.trim();
+  const [firstLine = "", ...restLines] = title.split(/\n+/u);
+
+  let code = null;
+  for (const match of firstLine.matchAll(
+    /(?<![A-Za-z0-9_])([A-Za-z]{2,6})[-_ ]?(\d{2,5})(?![0-9])/gu,
+  )) {
+    if (/[-_ ]/u.test(match[0]) || match[1] === match[1].toUpperCase()) {
+      code = `${match[1].toUpperCase()}-${match[2]}`;
+      break;
+    }
+  }
+
+  const raw_tags = [...title.matchAll(/#([^\s#｜|]+)/gu)]
+    .map((match) => match[1])
+    .slice(0, 20);
+
+  const actors = firstLine
+    .replace(/#[^\s#｜|]+/gu, " ")
+    .split(/[\s｜|、/,，·]+/u)
+    .map((token) => token.trim())
+    .filter(
+      (token) =>
+        token.length >= 2 &&
+        token.length <= 12 &&
+        /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{2,}/u.test(token) &&
+        !/[\[\]【】()（）:：…。.!？?～~]/u.test(token) &&
+        !/^[A-Za-z]{2,6}[-_ ]?\d{2,5}/u.test(token),
+    )
+    .slice(0, 20);
+
+  const description = restLines.join("\n").trim() || null;
+
+  return { title, code, raw_tags, actors, description };
 }
 
 function chunkTags(tags) {

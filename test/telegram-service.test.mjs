@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createTelegramService } from "../src/telegram-service.mjs";
+import { createTelegramService, parseChannelTitle } from "../src/telegram-service.mjs";
 import {
   CONFIG_DIR,
   loadJsonDirectory,
@@ -34,6 +34,40 @@ const sampleMedia = {
     { tag_id: "tag_chinese_subtitle", display_name: "中文字幕" },
   ],
 };
+
+test("parseChannelTitle handles the observed caption formats", () => {
+  const tagged = parseChannelTitle(
+    "JUR-552 #无码中字 #NTR #女教师 #人妻 #巨乳 橘メアリー\n\n橘メアリー穿着套装",
+  );
+  assert.equal(tagged.code, "JUR-552");
+  assert.deepEqual(tagged.raw_tags, ["无码中字", "NTR", "女教师", "人妻", "巨乳"]);
+  assert.deepEqual(tagged.actors, ["橘メアリー"]);
+  assert.equal(tagged.description, "橘メアリー穿着套装");
+
+  const nameList = parseChannelTitle("DASS-776 橘メアリー 流川莉央 波多野結衣");
+  assert.equal(nameList.code, "DASS-776");
+  assert.deepEqual(nameList.actors, ["橘メアリー", "流川莉央", "波多野結衣"]);
+
+  const pipes = parseChannelTitle("DASS-651 #无码中字 #希島あいり｜大槻ひびき｜波多野結衣");
+  assert.deepEqual(pipes.actors, ["大槻ひびき", "波多野結衣"]);
+  assert.ok(pipes.raw_tags.includes("希島あいり"));
+
+  const partSuffix = parseChannelTitle("ngod-347·1");
+  assert.equal(partSuffix.code, "NGOD-347");
+  assert.deepEqual(partSuffix.actors, []);
+
+  // The noisy resender title still contains a genuine code — extracting it
+  // is correct (the old importer wrongly grabbed "Pu229" here).
+  assert.equal(
+    parseChannelTitle("搜索T.me:Pu229每日更新GVH-766-UB_part1").code,
+    "GVH-766",
+  );
+
+  for (const noise of ["Join_file_034356268", "2372", "5月1日(1)"]) {
+    const parsed = parseChannelTitle(noise);
+    assert.equal(parsed.code, null, noise);
+  }
+});
 
 test("renders the channel template with only category, actors, and tags", () => {
   const text = createService().renderChannelPost(sampleMedia);
@@ -367,12 +401,15 @@ test("channel video post is ingested and gets a hashtag caption", async () => {
     {
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_CHANNEL_ID: "-1004460339207",
+      TELEGRAM_CHANNEL_DEFAULT_TAGS: "日本",
     },
   );
 
   assert.equal(result.ingested, "media_new");
   assert.equal(ingestCalls[0].code, "ABP-123");
   assert.equal(ingestCalls[0].source.provider, "channel");
+  assert.ok(ingestCalls[0].raw_tags.includes("日本"), "default tag applied");
+  assert.deepEqual(ingestCalls[0].actors, ["希島あいり"]);
   assert.equal(ingestCalls[0].metadata.tg_file_id, "VIDFILE");
   assert.ok(
     db.statements.some((s) => s.sql.includes("INSERT INTO media_files")),

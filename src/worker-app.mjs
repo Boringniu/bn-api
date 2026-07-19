@@ -92,7 +92,17 @@ export function createWorkerApp({
           assertBodySize(request);
           assertDb(env);
           const update = await readJson(request);
-          await telegramService.handleUpdate(env.DB, update, env);
+          // Always ack to Telegram: a thrown error would make it retry the
+          // same update forever and block every later update in the queue.
+          try {
+            await telegramService.handleUpdate(env.DB, update, env);
+          } catch (error) {
+            console.error("telegram update failed", {
+              message: error?.message,
+              requestId,
+              updateId: update?.update_id,
+            });
+          }
           return jsonResponse({ ok: true }, 200, requestId);
         }
 
