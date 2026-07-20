@@ -3,7 +3,7 @@ import { normalizeValue } from "./value-normalizer.mjs";
 const TELEGRAM_API = "https://api.telegram.org";
 // Telegram hard limit is 4096 chars per message; leave headroom.
 const PAGE_CHAR_LIMIT = 3800;
-const TAGS_PER_LINE = 6;
+const TAGS_PER_LINE = 5;
 
 export function createTelegramService({
   categoryConfig,
