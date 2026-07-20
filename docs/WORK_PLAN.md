@@ -1,83 +1,115 @@
-# 工作计划（2026-07-19 起）
+# 工作计划（更新于 2026-07-19 晚）
 
-本文档列出项目从当前状态到上线的剩余工作。已完成部分见 [progress-2026-07-19.md](progress-2026-07-19.md) 和 [CHANGELOG.md](CHANGELOG.md)，不再重复。
+本文档是项目的进度与剩余工作计划书。变更历史见 [CHANGELOG.md](CHANGELOG.md)，
+部署事实见 [progress-2026-07-19.md](progress-2026-07-19.md)。
 
-## 当前状态摘要
+## 一、当前进度总览
 
-- 配置中心（config/ + schema/ + 校验脚本 + CI）已达到标准 v1.0 要求，配置发布 1.2.0。
-- 运行时已实现：文本/番号标准化、标签与演员归一化、分类判定、媒体入库服务。
-- `bn-api` Worker 已实现 `GET /health` 和 `POST /v1/media`（Bearer Token 鉴权），本地 dry-run 构建通过。
-- D1 表结构已就绪（media、分类候选、演员关联、标签关联、review_items、ingest_events、database_metadata），迁移仅在本地应用过。
-- 本地 main 领先 origin/main 4 个提交，尚未推送。
+| 阶段 | 状态 |
+| --- | --- |
+| 一：Cloudflare 部署（D1 + Worker） | ✅ 完成 |
+| 二：查询与搜索 API | ✅ 完成 |
+| 三：审核后台 API | ✅ 完成 |
+| 四：Telegram Bot 与频道（频道优先流程） | ✅ 完成 |
+| 五：配置热更新与重索引 | ⬜ 未开始 |
+| 六：审核落地与字典扩充（新增） | ⬜ 待用户决策 |
 
-## 阶段一：Cloudflare 部署（已完成 2026-07-19）
+生产环境：
+- Worker：https://bn-api.niu900326.workers.dev（版本随 main 部署）
+- D1：`bn-media`（4 个迁移全部应用）
+- Bot：@MMCOOBOT；频道：`-1004460339207`；管理员：`8351469516`
+- 配置发布 1.2.0；测试 78 个全绿；CI（validate-config.yml）齐备
 
-已全部执行：`bn-media` D1 创建并迁移、`INGEST_TOKEN` 设置、Worker 部署在
-https://bn-api.niu900326.workers.dev ，冒烟验证通过。旧库 `bn2`（空）与
-`boringniu-media` 已删除；后者删除前发现含 90 条旧 Telegram 视频记录
-（file_id / message_id），已整库导出到
-`.backup/boringniu-media-export-20260719.sql`，阶段四做 Bot 时可评估是否
-回灌。
+## 二、已完成能力清单
 
-## 阶段二：查询与搜索 API（已完成 2026-07-19）
+**规则中心（标准 v1.0 达标）**
+- config/ 9 文件 + schema 一一对应；CI 校验 18 项（固定五分类、
+  演员中文名唯一、regex 测试样例实际执行、版本单调性、规范格式等）
+- 文档：CONFIG_GUIDE / REVIEW_GUIDE / NAMING_GUIDE / CHANGELOG
 
-已实现并线上验证：`GET /v1/search`（q 智能解析走完整 search_order 链 +
-组合筛选 ≤5 + 分页/200 上限）、`GET /v1/media/:id`、`GET /v1/codes`。
-公开结果仅 approved；忽略词返回空；模糊匹配 Levenshtein ≤2。
-遗留优化：演员/标签按名称的 D1 级搜索索引（当前走内存字典已够用）。
+**Worker API**
+- `POST /v1/media` 标准化入库（番号/分类/演员/标签/忽略词/审核项）
+- `GET /v1/search`、`GET /v1/media/:id`、`GET /v1/codes`
+- `GET /v1/review`、`POST /v1/review/:id/action`（七动作、双角色令牌）
+- `POST /telegram/webhook`、`POST /v1/channel/index`（置顶索引刷新）、
+  `POST /v1/channel/reconcile`（对账）、`POST /v1/channel/publish/:id`
 
-## 阶段三：审核后台 API（已完成 2026-07-19）
+**频道优先流程（今日重构后的最终形态）**
+- 用户向频道转发视频 → Bot 自动入库：标题第一行取番号（严格正则，
+  杜绝 Join_file_/Pu229 类误识）、#话题 进标签、名字样词进演员
+  （字典命中或含假名），正文进简介
+- 频道默认标签 `TELEGRAM_CHANNEL_DEFAULT_TAGS=日本`（频道主声明）
+- 置顶索引实时刷新，超长自动分页（第一页置顶，续页带"（续）"）
+- **视频消息本体不动**（用户要求）：转发消息 Telegram 禁止编辑，
+  hashtag 无法写入视频消息；复制替换能力保留在
+  `TELEGRAM_REPLACE_FORWARDS=1` 开关后，默认关闭
+- 对账：`reconcile` 探测频道已删消息并清理数据（`keep_media=1` 仅
+  断开映射）；单条发布遇消息已删自动重发
+- webhook 永不 500（单条坏消息不再阻塞队列——今日实际发生过，
+  153 条积压，已修复并排空）
+- 数据库曾被误清一次，已用 D1 Time Travel 完整恢复，零丢失
 
-已实现并线上验证：`GET /v1/review`（按 status/type/role 过滤分页）、
-`POST /v1/review/:id/action`（七个动作全通）。角色鉴权用两个独立
-Bearer secret（REVIEW_TOKEN_EDITOR / REVIEW_TOKEN_ADMIN，值在本地
-`.dev.vars`），角色由 token 决定、不信客户端声明；editor 审 admin 级
-返回 403，重复审核返回 409。approve/merge/deprecate/edit/link_existing
-生成 `config_proposal`（标记 requires_pull_request，注明目标配置文件和
-建议改动）存入 resolution_json，由人工提 PR 落地，符合标准 §十五。
-遗留：受影响 media 的重新标准化标记（并入阶段五的重索引）。
+**频道当前数据**
+- 71 条视频入库：52 approved（含 hashtag 说明文字）+ 19 pending
+- 置顶索引：#日本 (52)，演员 #叶山小百合 #橘玛丽
+- 44 条待审核项（清单见第三节）
 
-## 阶段四：Telegram Bot 与频道（已完成 2026-07-19）
+## 三、未完成事项与计划
 
-Bot：@MMCOOBOT（沿用原 Bot，旧 file_id 保持可用）。频道：`-1004460339207`
-（新建）。管理员：`8351469516`。
+### 阶段六（新增，下一步）：审核落地与字典扩充
 
-已实现并上线：
-- `POST /telegram/webhook`（Telegram secret header 校验）：Bot 收到任意
-  文本即走 search_order 解析并回复；/start /help 有引导；每次查询写入
-  search_logs（含解析类型与命中目标，为热词分析积累数据）。
-- `POST /v1/channel/publish/:id`（ingest token 鉴权）：按 display.json
-  模板渲染频道索引消息（仅分类/演员/类型三块、hashtag 替换规则、
-  上限截断、空块隐藏），message_id 记入 channel_posts；再次发布自动
-  editMessageText，"内容未变"响应按成功处理。
-- 迁移 0003：channel_posts、search_logs、media_files。
-- 旧库 32 条有标题记录经 /v1/media 重新入库（22 approved + 10 进审核，
-  即 pending_actor 等待确认），file_id 全部存入 media_files；40 条
-  "未命名视频"按约定放弃（导出 SQL 备份仍在 .backup/）。
-- 23 条 approved 内容已全部发布到新频道并可搜索验证。
+**为什么优先**：19 条 pending 视频和 44 条审核项等着；字典越全，
+以后转发的自动识别率越高。
 
-遗留：Bot 发视频文件（用 media_files 的 file_id 响应搜索结果）、
-/page 翻页命令的会话状态——可并入阶段五后打磨。
+**需要用户决策的清单**：
 
-## 阶段五：配置热更新与重索引
+待确认演员（8 个真名 + 1 个噪声）：
+波多野結衣（繁体，建议加为现有"波多野结衣"的别名）、藤かんな、
+森沢かな（建议并入现有"森泽佳奈"）、白雪美月、流川莉央、枫花恋、
+天音たお、七海ティナ；"分鍾"直接拒绝。
 
-当前 Worker 在构建时打包 config（import ... with type json），配置变更需重新部署：
+待确认标签（约 25 个）：
+真标签候选：中出、乳交、强奸、勒索、嫂子诱惑、黑丝OL、熟女、
+乱伦、姐姐、体检、白发女人等；
+应作别名的：无码中字→中文字幕；
+实为演员被打成标签的：希島あいり、星宮一花、古川伊織、白峰美羽、
+葉山さゆり、波多野结衣、枫可怜、叶山小百合♀；
+噪声：达♂、戲劇、單體作品、病毒 等建议拒绝或忽略。
 
-1. 决策：保持"合并 main 后 CI 自动重新部署 Worker"（简单，推荐先行）或实现"Worker 定时拉取 GitHub 配置 + 缓存"（标准 §十七的完整形态：5–15 分钟缓存、拉取失败用最后成功版本、首次失败停止标准化只存原始数据）。
-2. 每条处理结果已存 ruleset_version；实现按版本差异筛选受影响 media 的批量重新标准化任务（可用 Workers Cron Trigger）。
-3. 重索引完成后刷新频道消息。
+**执行步骤**（用户给出取舍后，约半天）：
+1. 按决策修改 config（演员/别名/标签/忽略词），版本升 1.3.0，CI 过
+2. 重放 19 条 pending（原始数据都在库里，不需要重新转发）
+3. 刷新置顶索引；审核队列清零
 
-## 第二阶段可延后项（标准 §十九）
+### 阶段五：配置热更新与重索引
 
-- alias.json 的复杂纠错规则与 regex Alias 实战条目
-- 审核建议自动生成 PR
-- 多管理员审批流
-- 搜索热词分析
-- 配置变更自动触发批量重索引的全自动化
+1. GitHub Actions 自动部署：合并 main → 自动 `wrangler deploy`
+   （需要用户在 GitHub 仓库 Settings→Secrets 添加 CLOUDFLARE_API_TOKEN）
+2. 重索引：按 ruleset_version 差异筛选受影响 media，批量重新标准化
+   （Workers Cron Trigger），完成后刷新置顶索引
+3. 这是"审核通过的规则自动生效"的最后一环，与阶段六配套
 
-## 风险与依赖备忘
+### 打磨项（可穿插）
 
-- Wrangler OAuth 凭据在 /tmp，环境重启即失效，阶段一开始时大概率要重新登录。
-- 仓库标准要求 PR 合并、禁止直推 main；本地 4 个提交推送时若遇分支保护需改走 PR。
-- 演员字典仅 27 人，真实数据入库后 pending_actor 会大量堆积，阶段三的审核效率直接决定内容可见速度。
-- D1 免费额度与 Telegram API 速率限制在阶段四前需确认。
+- Bot 搜索结果直接发视频文件（file_id 已全部在 media_files）
+- Bot `/page` 翻页
+- 未识别（pending）视频在审核通过后自动补 hashtag 的策略
+  （受"不动转发消息"限制，需与用户确认交互方式）
+- 搜索热词分析（search_logs 已在积累数据）
+
+## 四、待用户决策/提供
+
+1. **阶段六的字典取舍**（上面清单，逐个说"收/别名/忽略"即可）
+2. **阶段五**：往 GitHub 仓库 Secrets 放一个 Cloudflare API Token
+   （我提供步骤），或选择继续手动部署
+3. **置顶索引跳转取舍**：不动视频 = 索引 hashtag 点击搜不到转发的
+   视频（Telegram 限制）；要跳转需开 `TELEGRAM_REPLACE_FORWARDS=1`
+4. 项目收尾时：Roll/删除 Cloudflare API Token（曾在聊天中出现）
+
+## 五、风险备忘
+
+- Wrangler 凭据用 `.dev.vars.deploy`（gitignore 内），环境重启不丢，
+  但 Codespace 删除会丢——已提醒项目结束时废除 token
+- 演员字典 30+ 人，扩充节奏决定自动识别率
+- Telegram 速率限制：批量频道操作需 3 秒/条节流（脚本已内置）
+- D1 Time Travel 保留 30 天，是最后的数据兜底
