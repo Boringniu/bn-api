@@ -318,15 +318,17 @@ export function createTelegramService({
           });
         } catch (error) {
           if (String(error.message).includes("message can't be edited")) {
-            // Forwarded messages cannot be edited by anyone. Replace the
-            // forward with a bot-owned copy that carries the caption, so
-            // pinned-index hashtags can reach the video.
-            await this.replaceWithCopy(db, env, {
-              caption,
-              channelId,
-              mediaId: result.id,
-              messageId: post.message_id,
-            });
+            // Forwarded messages cannot be edited by anyone. The owner has
+            // opted to leave forwarded videos untouched; replacing them with
+            // a captioned bot copy is available behind an explicit flag.
+            if (env.TELEGRAM_REPLACE_FORWARDS === "1") {
+              await this.replaceWithCopy(db, env, {
+                caption,
+                channelId,
+                mediaId: result.id,
+                messageId: post.message_id,
+              });
+            }
           } else if (!String(error.message).includes("message is not modified")) {
             console.warn("caption update failed", {
               message: error.message,
