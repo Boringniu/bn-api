@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.3.0",
-  "updated_at": "2026-07-21T05:35:40.897414Z",
+  "config_version": "1.3.1",
+  "updated_at": "2026-07-21T15:46:12Z",
   "updated_by": "admin",
   "items": [
     {
@@ -379,7 +379,7 @@
       "display_enabled": true,
       "search_enabled": true,
       "weight": 90,
-      "category": "action",
+      "category": "theme",
       "aliases": [
         "中出",
         "中だし",
@@ -402,7 +402,7 @@
       "display_enabled": true,
       "search_enabled": true,
       "weight": 85,
-      "category": "action",
+      "category": "theme",
       "aliases": [
         "乳交",
         "パイズリ"
@@ -496,14 +496,12 @@
       "aliases": [
         "黑丝OL",
         "黑丝",
-        "黒ストッキング",
-        "OL"
+        "黒ストッキング"
       ],
       "normalized_aliases": [
         "黑丝ol",
         "黑丝",
-        "黒ストッキング",
-        "ol"
+        "黒ストッキング"
       ],
       "description": "黑丝OL题材",
       "created_at": "2026-07-21T05:35:40.897307Z",

@@ -108,6 +108,26 @@ test("creates a category review when no category is resolved", () => {
   assert.equal(result.reviews[0].required_reviewer_role, "admin");
 });
 
+test("does not recreate category reviews for an explicitly rejected value", () => {
+  const options = structuredClone(baseOptions);
+  options.ignoredConfig.items.push({
+    ignore_id: "ignore_999999",
+    value: "日本电影",
+    normalized_value: "日本电影",
+    scope: ["category", "tag"],
+    match_mode: "exact",
+    reason: "manual rejection",
+    status: "approved",
+    created_at: "2026-07-21T00:00:00Z",
+  });
+
+  const result = createTagNormalizer(options).normalize(["日本电影"]);
+
+  assert.equal(result.selected_category, null);
+  assert.equal(result.reviews.length, 0);
+  assert.equal(result.decisions[0].outcome, "ignored");
+});
+
 test("does not activate pending dictionary entries", () => {
   const options = structuredClone(baseOptions);
   const ntr = options.tagDictionaryConfig.items.find(

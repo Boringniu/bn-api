@@ -106,28 +106,6 @@ export function createWorkerApp({
           return jsonResponse({ ok: true }, 200, requestId);
         }
 
-        const publishMatch = url.pathname.match(
-          /^\/v1\/channel\/publish\/([a-z0-9_]+)$/,
-        );
-        if (request.method === "POST" && publishMatch) {
-          assertAuthorized(request, env);
-          assertDb(env);
-          const media = await searchService.getMedia(env.DB, publishMatch[1]);
-          if (!media) {
-            throw new HttpError(
-              404,
-              "media not found or not approved",
-              "media_not_found",
-            );
-          }
-          const result = await telegramService.publishToChannel(
-            env.DB,
-            media,
-            env,
-          );
-          return jsonResponse({ data: result }, 200, requestId);
-        }
-
         if (request.method === "POST" && url.pathname === "/v1/channel/index") {
           assertAuthorized(request, env);
           assertDb(env);
@@ -135,15 +113,17 @@ export function createWorkerApp({
           return jsonResponse({ data: result }, 200, requestId);
         }
 
-        if (request.method === "POST" && url.pathname === "/v1/channel/reconcile") {
+        if (request.method === "POST" && url.pathname === "/v1/catalog/reindex") {
           assertAuthorized(request, env);
           assertDb(env);
-          const keep = url.searchParams.get("keep_media") === "1";
-          const result = await telegramService.reconcileChannel(env.DB, env, {
-            deleteMedia: !keep,
+          const result = await reindexCatalog({
+            db: env.DB,
+            ingestService,
+            telegramService,
+            versionConfig,
+            env,
           });
-          const index = await telegramService.refreshPinnedIndex(env.DB, env);
-          return jsonResponse({ data: { ...result, index } }, 200, requestId);
+          return jsonResponse({ data: result }, 200, requestId);
         }
 
         if (request.method === "POST" && url.pathname === "/v1/media") {
@@ -309,6 +289,64 @@ async function handleSearch(searchService, db, url) {
     pageSize,
   });
   return { query, resolution, ...result };
+}
+
+async function reindexCatalog({
+  db,
+  env,
+  ingestService,
+  telegramService,
+  versionConfig,
+}) {
+  const rows = (
+    await db
+      .prepare(
+        `SELECT id, raw_payload_json
+         FROM media
+         WHERE ruleset_version <> ?
+           AND status NOT IN ('rejected', 'disabled')
+         ORDER BY id
+         LIMIT 50`,
+      )
+      .bind(versionConfig.release.version)
+      .all()
+  ).results ?? [];
+
+  for (const row of rows) {
+    let payload;
+    try {
+      payload = JSON.parse(row.raw_payload_json);
+    } catch {
+      throw new HttpError(
+        409,
+        `media ${row.id} has invalid raw payload`,
+        "invalid_stored_payload",
+      );
+    }
+    await ingestService.ingest(db, payload);
+  }
+
+  const remainingRow = await db
+    .prepare(
+      `SELECT COUNT(*) AS total
+       FROM media
+       WHERE ruleset_version <> ?
+         AND status NOT IN ('rejected', 'disabled')`,
+    )
+    .bind(versionConfig.release.version)
+    .first();
+  const remaining = Number(remainingRow?.total ?? 0);
+  const index =
+    remaining === 0
+      ? await telegramService.refreshPinnedIndex(db, env)
+      : null;
+
+  return {
+    processed: rows.length,
+    remaining,
+    ruleset_version: versionConfig.release.version,
+    index,
+  };
 }
 
 function assertReviewer(request, env) {

@@ -277,6 +277,78 @@ test("review action passes the authenticated role, not a client claim", async ()
   assert.equal(reviewService.actionCalls[0].options.reviewerRole, "editor");
 });
 
+test("removed channel distribution routes return 404", async () => {
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService: {},
+    versionConfig,
+  });
+  const env = { DB: {}, INGEST_TOKEN: "secret" };
+
+  for (const path of [
+    "/v1/channel/publish/media_1",
+    "/v1/channel/reconcile",
+  ]) {
+    const response = await app.fetch(
+      new Request(`https://api.example.com${path}`, {
+        method: "POST",
+        headers: { authorization: "Bearer secret" },
+      }),
+      env,
+    );
+    assert.equal(response.status, 404, path);
+  }
+});
+
+test("reindexes stored payloads and refreshes the index when complete", async () => {
+  const ingestService = createIngestStub({ status: "approved" });
+  const telegramService = {
+    refreshCalls: 0,
+    async refreshPinnedIndex() {
+      this.refreshCalls += 1;
+      return { outcome: "edited", pages: 1, message_ids: [10] };
+    },
+  };
+  const app = createWorkerApp({
+    ingestService,
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService,
+    versionConfig,
+  });
+  const db = new CatalogD1([
+    {
+      id: "media_1",
+      raw_payload_json: JSON.stringify({
+        source: { provider: "channel", external_id: "-100:1" },
+        title: "ABP-123",
+        raw_tags: ["日本"],
+      }),
+    },
+  ]);
+
+  const response = await app.fetch(
+    new Request("https://api.example.com/v1/catalog/reindex", {
+      method: "POST",
+      headers: { authorization: "Bearer secret" },
+    }),
+    {
+      DB: db,
+      INGEST_TOKEN: "secret",
+      TELEGRAM_CHANNEL_ID: "-100",
+    },
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.data.processed, 1);
+  assert.equal(body.data.remaining, 0);
+  assert.equal(ingestService.calls.length, 1);
+  assert.equal(telegramService.refreshCalls, 1);
+});
+
 function createReviewStub() {
   return {
     actionCalls: [],
@@ -335,4 +407,25 @@ function jsonRequest(url, body, token = null) {
     headers,
     body: JSON.stringify(body),
   });
+}
+
+class CatalogD1 {
+  constructor(rows) {
+    this.rows = rows;
+  }
+
+  prepare(sql) {
+    const db = this;
+    return {
+      bind() {
+        return this;
+      },
+      async all() {
+        return { results: db.rows };
+      },
+      async first() {
+        return { total: 0 };
+      },
+    };
+  }
 }

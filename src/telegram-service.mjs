@@ -100,10 +100,6 @@ export function createTelegramService({
           lines.push(media.source_url);
         }
       }
-      const totalPages = Math.max(1, Math.ceil(total / page_size));
-      if (totalPages > 1) {
-        lines.push(`第 ${page}/${totalPages} 页，发送 /page ${page + 1} 查看下一页`);
-      }
       return lines.join("\n");
     },
 
@@ -113,7 +109,8 @@ export function createTelegramService({
       }
       const message = update?.message;
       const text = message?.text?.trim();
-      if (!message || !text) {
+      // 私聊 Bot 只承担番号查询；群组和频道里的普通消息不响应。
+      if (!message || message.chat?.type !== "private" || !text) {
         return null;
       }
       const chatId = message.chat.id;
@@ -124,10 +121,9 @@ export function createTelegramService({
       if (text === "/start" || text === "/help") {
         reply =
           "📚 命令列表\n\n" +
-          "🔍 搜索\n" +
-          "发送演员、标签、分类或番号即可搜索\n" +
-          "示例：希岛爱理 / 人妻 / ABP-123 / 中字\n\n" +
-          "/page <N> - 翻页查看更多结果\n\n" +
+          "🔍 番号查询\n" +
+          "直接发送番号即可查询\n" +
+          "示例：ABP-123\n\n" +
           "🔧 管理（Admin Only）\n" +
           "/refresh - 刷新频道置顶索引";
       } else if (text === "/refresh") {
@@ -145,7 +141,9 @@ export function createTelegramService({
       } else {
         const query = text.replace(/^\/search\s+/u, "");
         const { resolution } = searchService.resolveQuery(query);
-        const searchResult = resolution
+        const isCodeQuery =
+          resolution?.type === "code" || resolution?.type === "code_prefix";
+        const searchResult = isCodeQuery
           ? await searchService.findMedia(db, {
               filters: resolutionFilters(resolution),
               page: 1,
@@ -160,10 +158,12 @@ export function createTelegramService({
           resultCount: searchResult.total,
         });
 
-        reply = this.renderBotResults(
-          { query, ...searchResult },
-          { isAuthorized: isUserAdmin },
-        );
+        reply = isCodeQuery
+          ? this.renderBotResults(
+              { query, ...searchResult },
+              { isAuthorized: isUserAdmin },
+            )
+          : "请输入完整番号，例如 ABP-123。";
       }
 
       await this.callTelegram(env, "sendMessage", {
@@ -173,10 +173,8 @@ export function createTelegramService({
       return { chat_id: chatId, replied: true };
     },
 
-    // A video posted (or forwarded) into the channel becomes the source of
-    // truth: ingest it through the normal pipeline, remember its file_id and
-    // message id, and append the hashtag line to its caption so the pinned
-    // index can reach it.
+    // 频道原视频是唯一内容来源：这里只读取并登记编目信息，绝不修改、
+    // 复制、删除或重新发送视频消息。
     async handleChannelPost(db, post, env) {
       const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
       if (String(post.chat?.id ?? "") !== channelId) {
@@ -187,9 +185,7 @@ export function createTelegramService({
         return null;
       }
 
-      // A copy the bot just made of an existing video arrives here as a
-      // fresh channel_post; remap the tracked message instead of ingesting
-      // a duplicate media row.
+      // 同一 Telegram 文件再次出现时只更新消息映射，避免重复建档。
       const known = await db
         .prepare(
           `SELECT media_id FROM media_files
@@ -308,54 +304,8 @@ export function createTelegramService({
         )
         .run();
 
-      // Rewrite the caption with the standard hashtag block when the media
-      // is approved; leave the original caption alone otherwise.
       if (result.status === "approved") {
-        const media = {
-          id: result.id,
-          category: result.category
-            ? {
-                category_id: result.category.category_id,
-                display_name: result.category.display_name,
-              }
-            : null,
-          actors: result.actors ?? [],
-          tags: result.tags ?? [],
-        };
-        const hashtagBlock = this.renderChannelPost(media);
-        const firstLine = rawText.split(/\n/u)[0] ?? "";
-        const caption = (firstLine
-          ? `${firstLine}\n\n${hashtagBlock}`
-          : hashtagBlock
-        ).slice(0, 1024);
-        try {
-          await this.callTelegram(env, "editMessageCaption", {
-            chat_id: channelId,
-            message_id: post.message_id,
-            caption,
-          });
-        } catch (error) {
-          if (String(error.message).includes("message can't be edited")) {
-            // Forwarded messages cannot be edited by anyone. The owner has
-            // opted to leave forwarded videos untouched; replacing them with
-            // a captioned bot copy is available behind an explicit flag.
-            if (env.TELEGRAM_REPLACE_FORWARDS === "1") {
-              await this.replaceWithCopy(db, env, {
-                caption,
-                channelId,
-                mediaId: result.id,
-                messageId: post.message_id,
-              });
-            }
-          } else if (!String(error.message).includes("message is not modified")) {
-            console.warn("caption update failed", {
-              message: error.message,
-              messageId: post.message_id,
-            });
-          }
-        }
-        // Keep the pinned index live: every approved channel video refreshes
-        // it immediately. Failures must not break the ingest ack to Telegram.
+        // 审核通过后只刷新置顶索引；刷新失败不能影响本次入库。
         try {
           await this.refreshPinnedIndex(db, env);
         } catch (error) {
@@ -366,194 +316,6 @@ export function createTelegramService({
       }
 
       return { ingested: result.id, status: result.status };
-    },
-
-    async replaceWithCopy(db, env, { caption, channelId, mediaId, messageId }) {
-      try {
-        const copied = await this.callTelegram(env, "copyMessage", {
-          chat_id: channelId,
-          from_chat_id: channelId,
-          message_id: messageId,
-          caption,
-          disable_notification: true,
-        });
-        await this.callTelegram(env, "deleteMessage", {
-          chat_id: channelId,
-          message_id: messageId,
-        });
-        await db
-          .prepare(
-            `UPDATE channel_posts SET tg_message_id = ?, updated_at = ?
-             WHERE media_id = ?`,
-          )
-          .bind(copied.message_id, new Date().toISOString(), mediaId)
-          .run();
-        return copied.message_id;
-      } catch (error) {
-        console.warn("copy replacement failed", {
-          mediaId,
-          message: error.message,
-        });
-        return null;
-      }
-    },
-
-    // Compare channel_posts against the live channel and drop rows whose
-    // message has been deleted by hand; cascade-remove the media so search
-    // and the pinned index stay honest.
-    async reconcileChannel(db, env, { deleteMedia = true } = {}) {
-      const channelId = env.TELEGRAM_CHANNEL_ID;
-      if (!channelId) {
-        throw new Error("TELEGRAM_CHANNEL_ID is not configured");
-      }
-      const rows = (
-        await db
-          .prepare(
-            "SELECT media_id, tg_message_id FROM channel_posts ORDER BY tg_message_id",
-          )
-          .all()
-      ).results ?? [];
-
-      const missing = [];
-      for (const row of rows) {
-        // forwardMessage to the channel itself is the cheapest existence
-        // probe Telegram offers; copyMessage avoids the "forwarded from"
-        // header and can be deleted immediately.
-        try {
-          const copied = await this.callTelegram(env, "copyMessage", {
-            chat_id: channelId,
-            from_chat_id: channelId,
-            message_id: row.tg_message_id,
-            disable_notification: true,
-          });
-          await this.callTelegram(env, "deleteMessage", {
-            chat_id: channelId,
-            message_id: copied.message_id,
-          });
-        } catch (error) {
-          if (/message to copy not found|MESSAGE_ID_INVALID/iu.test(error.message)) {
-            missing.push(row);
-          } else {
-            throw error;
-          }
-        }
-      }
-
-      for (const row of missing) {
-        if (deleteMedia) {
-          await db
-            .prepare("DELETE FROM media WHERE id = ?")
-            .bind(row.media_id)
-            .run();
-        } else {
-          await db
-            .prepare("DELETE FROM channel_posts WHERE media_id = ?")
-            .bind(row.media_id)
-            .run();
-        }
-      }
-
-      return {
-        checked: rows.length,
-        removed: missing.map((row) => ({
-          media_id: row.media_id,
-          tg_message_id: row.tg_message_id,
-        })),
-      };
-    },
-
-    async publishToChannel(db, media, env) {
-      if (!channelIndex.enabled) {
-        return { published: false, reason: "channel_index_disabled" };
-      }
-      const channelId = env.TELEGRAM_CHANNEL_ID;
-      if (!channelId) {
-        throw new Error("TELEGRAM_CHANNEL_ID is not configured");
-      }
-
-      const text = this.renderChannelPost(media);
-      const file = await db
-        .prepare("SELECT tg_file_id FROM media_files WHERE media_id = ?")
-        .bind(media.id)
-        .first();
-      const existing = await db
-        .prepare("SELECT tg_message_id FROM channel_posts WHERE media_id = ?")
-        .bind(media.id)
-        .first();
-      const timestamp = new Date().toISOString();
-
-      if (existing) {
-        const method = file ? "editMessageCaption" : "editMessageText";
-        const payload = file
-          ? { chat_id: channelId, message_id: existing.tg_message_id, caption: text }
-          : { chat_id: channelId, message_id: existing.tg_message_id, text };
-        let vanished = false;
-        try {
-          await this.callTelegram(env, method, payload);
-        } catch (error) {
-          if (String(error.message).includes("message is not modified")) {
-            // Telegram rejects edits that leave the message unchanged; that
-            // still counts as the channel being up to date.
-          } else if (
-            /message to edit not found|MESSAGE_ID_INVALID/iu.test(error.message)
-          ) {
-            // The message was deleted by hand; fall through and repost.
-            vanished = true;
-          } else {
-            throw error;
-          }
-        }
-        if (!vanished) {
-          await db
-            .prepare(
-              "UPDATE channel_posts SET template_version = ?, updated_at = ? WHERE media_id = ?",
-            )
-            .bind(versionConfig.release.version, timestamp, media.id)
-            .run();
-          return {
-            published: true,
-            outcome: "edited",
-            tg_message_id: existing.tg_message_id,
-          };
-        }
-        await db
-          .prepare("DELETE FROM channel_posts WHERE media_id = ?")
-          .bind(media.id)
-          .run();
-      }
-
-      const sent = file
-        ? await this.callTelegram(env, "sendVideo", {
-            chat_id: channelId,
-            video: file.tg_file_id,
-            caption: text,
-          })
-        : await this.callTelegram(env, "sendMessage", {
-            chat_id: channelId,
-            text,
-          });
-      await db
-        .prepare(
-          `INSERT INTO channel_posts (
-             media_id, tg_chat_id, tg_message_id, template_version,
-             posted_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          media.id,
-          String(channelId),
-          sent.message_id,
-          versionConfig.release.version,
-          timestamp,
-          timestamp,
-        )
-        .run();
-      return {
-        published: true,
-        outcome: "created",
-        kind: file ? "video" : "text",
-        tg_message_id: sent.message_id,
-      };
     },
 
     async refreshPinnedIndex(db, env) {

@@ -30,7 +30,7 @@ jobs:
         run: npm ci
 
       - name: Validate JSON and schemas
-        run: npm run validate
+        run: npm run validate:decisions && npm run validate
 
       - name: Check duplicate aliases
         run: npm run check:aliases

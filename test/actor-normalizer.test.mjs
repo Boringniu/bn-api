@@ -11,6 +11,7 @@ const configs = await loadJsonDirectory(CONFIG_DIR);
 const normalizer = createActorNormalizer({
   actorDictionaryConfig: requireConfig("actor_dictionary"),
   aliasConfig: requireConfig("alias"),
+  ignoredConfig: requireConfig("ignored"),
   reviewRulesConfig: requireConfig("review_rules"),
   versionConfig: requireConfig("version"),
 });
@@ -47,6 +48,31 @@ test("accepts a missing actor list as an empty list", () => {
   assert.throws(() => normalizer.normalize("希岛爱理"), /must be an array/);
 });
 
+test("does not recreate reviews for actors explicitly rejected by the owner", () => {
+  const ignoredConfig = structuredClone(requireConfig("ignored"));
+  ignoredConfig.items.push({
+    ignore_id: "ignore_999999",
+    value: "未知演员",
+    normalized_value: "未知演员",
+    scope: ["actor"],
+    match_mode: "exact",
+    reason: "manual rejection",
+    status: "approved",
+    created_at: "2026-07-21T00:00:00Z",
+  });
+  const result = createActorNormalizer({
+    actorDictionaryConfig: requireConfig("actor_dictionary"),
+    aliasConfig: requireConfig("alias"),
+    ignoredConfig,
+    reviewRulesConfig: requireConfig("review_rules"),
+    versionConfig: requireConfig("version"),
+  }).normalize(["未知演员"]);
+
+  assert.equal(result.actors.length, 0);
+  assert.equal(result.reviews.length, 0);
+  assert.equal(result.decisions[0].outcome, "ignored");
+});
+
 test("refuses runtime rules that allow AI to create actors", () => {
   const actorDictionaryConfig = structuredClone(
     requireConfig("actor_dictionary"),
@@ -58,6 +84,7 @@ test("refuses runtime rules that allow AI to create actors", () => {
       createActorNormalizer({
         actorDictionaryConfig,
         aliasConfig: requireConfig("alias"),
+        ignoredConfig: requireConfig("ignored"),
         reviewRulesConfig: requireConfig("review_rules"),
         versionConfig: requireConfig("version"),
       }),

@@ -16,6 +16,7 @@ const service = createIngestService({
   actorNormalizer: createActorNormalizer({
     actorDictionaryConfig: requireConfig("actor_dictionary"),
     aliasConfig: requireConfig("alias"),
+    ignoredConfig: requireConfig("ignored"),
     reviewRulesConfig: requireConfig("review_rules"),
     versionConfig,
   }),

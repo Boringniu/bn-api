@@ -47,9 +47,18 @@ export function createSearchService({
   const ignoredValues = new Set(
     ignoredConfig.items
       .filter(
-        (item) => item.status === APPROVED_STATUS && item.match_mode !== "regex",
+        (item) =>
+          item.status === APPROVED_STATUS &&
+          item.match_mode !== "regex",
       )
-      .map((item) => item.normalized_value),
+      .map((item) => item.normalized_value)
+      // “演员名误作标签”只能在标签处理中忽略，不能覆盖合法实体别名。
+      .filter(
+        (value) =>
+          !indexes.actorValues.has(value) &&
+          !indexes.tagValues.has(value) &&
+          !indexes.categoryValues.has(value),
+      ),
   );
 
   return Object.freeze({

@@ -26,6 +26,7 @@ import { createWorkerApp } from "./worker-app.mjs";
 const actorNormalizer = createActorNormalizer({
   actorDictionaryConfig,
   aliasConfig,
+  ignoredConfig,
   reviewRulesConfig,
   versionConfig,
 });

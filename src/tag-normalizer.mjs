@@ -68,6 +68,7 @@ function normalizeTags({
   const categoryMatches = new Map();
   const tagMatches = new Map();
   const ignoredTags = [];
+  let ignoredCategoryDecision = false;
   const reviews = new Map();
   const decisions = [];
 
@@ -83,6 +84,9 @@ function normalizeTags({
       normalizedValue,
     );
     if (ignoredMatch) {
+      if (ignoredMatch.target.scope.includes("category")) {
+        ignoredCategoryDecision = true;
+      }
       ignoredTags.push({
         input_index: inputIndex,
         raw_value: rawValue,
@@ -229,7 +233,7 @@ function normalizeTags({
     .sort(compareCategories);
   const selectedCategory = categoryCandidates[0] ?? null;
 
-  if (!selectedCategory) {
+  if (!selectedCategory && !ignoredCategoryDecision) {
     addReview(reviews, reviewRules, {
       normalizedValues: rawTags.map(normalizeValue),
       rawValues: rawTags,
@@ -343,7 +347,8 @@ function buildIgnoredMatchers(ignoredConfig) {
   return ignoredConfig.items
     .filter(
       (item) =>
-        item.status === APPROVED_STATUS && item.scope.includes("tag"),
+        item.status === APPROVED_STATUS &&
+        (item.scope.includes("tag") || item.scope.includes("category")),
     )
     .map((item) =>
       createMatcher({

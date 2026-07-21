@@ -5,11 +5,13 @@ const APPROVED_STATUS = "approved";
 export function createActorNormalizer({
   actorDictionaryConfig,
   aliasConfig,
+  ignoredConfig,
   reviewRulesConfig,
   versionConfig,
 }) {
   assertConfig(actorDictionaryConfig, "actorDictionaryConfig");
   assertConfig(aliasConfig, "aliasConfig");
+  assertConfig(ignoredConfig, "ignoredConfig");
   assertConfig(reviewRulesConfig, "reviewRulesConfig");
   assertConfig(versionConfig, "versionConfig");
   assertRuntimeRules(actorDictionaryConfig);
@@ -28,6 +30,16 @@ export function createActorNormalizer({
       .filter((rule) => rule.enabled)
       .map((rule) => [rule.type, rule]),
   );
+  const ignoredActors = new Set(
+    ignoredConfig.items
+      .filter(
+        (item) =>
+          item.status === APPROVED_STATUS &&
+          item.match_mode !== "regex" &&
+          item.scope.includes("actor"),
+      )
+      .map((item) => item.normalized_value),
+  );
 
   return Object.freeze({
     normalize(rawActors = []) {
@@ -41,6 +53,20 @@ export function createActorNormalizer({
         const normalizedValue = normalizeValue(rawValue);
         if (!normalizedValue) {
           throw new TypeError(`rawActors[${inputIndex}] must not be blank`);
+        }
+
+        if (ignoredActors.has(normalizedValue)) {
+          decisions.push({
+            input_index: inputIndex,
+            raw_value: rawValue,
+            normalized_value: normalizedValue,
+            outcome: "ignored",
+            actor_id: null,
+            display_name: null,
+            source: "ignored",
+            review_type: null,
+          });
+          continue;
         }
 
         const matches = deduplicateMatches(
