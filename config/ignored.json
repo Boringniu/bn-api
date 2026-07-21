@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.1.0",
-  "updated_at": "2026-07-19T08:04:44Z",
+  "config_version": "1.3.0",
+  "updated_at": "2026-07-21T05:41:35.771449Z",
   "updated_by": "admin",
   "items": [
     {
@@ -208,6 +208,138 @@
       "reason": "有码写法：审查状态属于元数据，应保存至 D1 media.metadata_json，不作为标准标签（配置标准 §五）",
       "status": "approved",
       "created_at": "2026-07-19T08:04:44Z"
+    },
+    {
+      "ignore_id": "ignore_000017",
+      "value": "希島あいり",
+      "normalized_value": "希島あいり",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "应作演员名，非标签",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771256Z"
+    },
+    {
+      "ignore_id": "ignore_000018",
+      "value": "星宮一花",
+      "normalized_value": "星宮一花",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "应作演员名，非标签",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771278Z"
+    },
+    {
+      "ignore_id": "ignore_000019",
+      "value": "古川伊織",
+      "normalized_value": "古川伊織",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "应作演员名，非标签",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771289Z"
+    },
+    {
+      "ignore_id": "ignore_000020",
+      "value": "白峰美羽",
+      "normalized_value": "白峰美羽",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "应作演员名，非标签",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771298Z"
+    },
+    {
+      "ignore_id": "ignore_000021",
+      "value": "葉山さゆり",
+      "normalized_value": "葉山さゆり",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "应作演员名，非标签",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771305Z"
+    },
+    {
+      "ignore_id": "ignore_000022",
+      "value": "枫可怜",
+      "normalized_value": "枫可怜",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "应作演员名，非标签",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771311Z"
+    },
+    {
+      "ignore_id": "ignore_000023",
+      "value": "分鍾",
+      "normalized_value": "分鍾",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "时间单位噪声词",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771318Z"
+    },
+    {
+      "ignore_id": "ignore_000024",
+      "value": "达♂",
+      "normalized_value": "达♂",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "音声效果符号噪声",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771325Z"
+    },
+    {
+      "ignore_id": "ignore_000025",
+      "value": "戲劇",
+      "normalized_value": "戲劇",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "泛化词，无筛选价值",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771332Z"
+    },
+    {
+      "ignore_id": "ignore_000026",
+      "value": "單體作品",
+      "normalized_value": "單體作品",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "作品形式元数据，非标签",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771339Z"
+    },
+    {
+      "ignore_id": "ignore_000027",
+      "value": "病毒",
+      "normalized_value": "病毒",
+      "scope": [
+        "tag"
+      ],
+      "match_mode": "exact",
+      "reason": "垃圾噪声词",
+      "status": "approved",
+      "created_at": "2026-07-21T05:41:35.771350Z"
     }
   ],
   "rules": {

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.2.0",
-  "updated_at": "2026-07-19T08:04:44Z",
+  "config_version": "1.3.0",
+  "updated_at": "2026-07-21T05:35:40.897414Z",
   "updated_by": "admin",
   "items": [
     {
@@ -22,7 +22,8 @@
         "简中",
         "繁中",
         "中文配音",
-        "Chinese"
+        "Chinese",
+        "无码中字"
       ],
       "normalized_aliases": [
         "中字",
@@ -33,7 +34,8 @@
         "简中",
         "繁中",
         "中文配音",
-        "chinese"
+        "chinese",
+        "无码中字"
       ],
       "description": "带有中文字幕或中文语言支持的内容",
       "created_at": "2026-07-18T00:00:00Z",
@@ -368,6 +370,215 @@
       "description": "巨乳题材",
       "created_at": "2026-07-18T18:04:37Z",
       "updated_at": "2026-07-18T18:04:37Z"
+    },
+    {
+      "tag_id": "tag_creampie",
+      "display_name": "中出",
+      "slug": "creampie",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 90,
+      "category": "action",
+      "aliases": [
+        "中出",
+        "中だし",
+        "中出し"
+      ],
+      "normalized_aliases": [
+        "中出",
+        "中だし",
+        "中出し"
+      ],
+      "description": "中出题材",
+      "created_at": "2026-07-21T05:35:40.897182Z",
+      "updated_at": "2026-07-21T05:35:40.897260Z"
+    },
+    {
+      "tag_id": "tag_titjob",
+      "display_name": "乳交",
+      "slug": "titjob",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 85,
+      "category": "action",
+      "aliases": [
+        "乳交",
+        "パイズリ"
+      ],
+      "normalized_aliases": [
+        "乳交",
+        "パイズリ"
+      ],
+      "description": "乳交题材",
+      "created_at": "2026-07-21T05:35:40.897272Z",
+      "updated_at": "2026-07-21T05:35:40.897276Z"
+    },
+    {
+      "tag_id": "tag_rape",
+      "display_name": "强奸",
+      "slug": "rape",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 85,
+      "category": "theme",
+      "aliases": [
+        "强奸",
+        "強姦",
+        "rape"
+      ],
+      "normalized_aliases": [
+        "强奸",
+        "強姦",
+        "rape"
+      ],
+      "description": "强奸题材",
+      "created_at": "2026-07-21T05:35:40.897287Z",
+      "updated_at": "2026-07-21T05:35:40.897289Z"
+    },
+    {
+      "tag_id": "tag_blackmail",
+      "display_name": "勒索",
+      "slug": "blackmail",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 80,
+      "category": "theme",
+      "aliases": [
+        "勒索",
+        "脅迫",
+        "勒索题材"
+      ],
+      "normalized_aliases": [
+        "勒索",
+        "脅迫",
+        "勒索题材"
+      ],
+      "description": "勒索题材",
+      "created_at": "2026-07-21T05:35:40.897294Z",
+      "updated_at": "2026-07-21T05:35:40.897296Z"
+    },
+    {
+      "tag_id": "tag_sister_seduction",
+      "display_name": "嫂子诱惑",
+      "slug": "sister-seduction",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 80,
+      "category": "theme",
+      "aliases": [
+        "嫂子诱惑",
+        "嫂子",
+        "兄嫂"
+      ],
+      "normalized_aliases": [
+        "嫂子诱惑",
+        "嫂子",
+        "兄嫂"
+      ],
+      "description": "嫂子诱惑题材",
+      "created_at": "2026-07-21T05:35:40.897300Z",
+      "updated_at": "2026-07-21T05:35:40.897303Z"
+    },
+    {
+      "tag_id": "tag_black_ol",
+      "display_name": "黑丝OL",
+      "slug": "black-ol",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 75,
+      "category": "theme",
+      "aliases": [
+        "黑丝OL",
+        "黑丝",
+        "黒ストッキング",
+        "OL"
+      ],
+      "normalized_aliases": [
+        "黑丝ol",
+        "黑丝",
+        "黒ストッキング",
+        "ol"
+      ],
+      "description": "黑丝OL题材",
+      "created_at": "2026-07-21T05:35:40.897307Z",
+      "updated_at": "2026-07-21T05:35:40.897309Z"
+    },
+    {
+      "tag_id": "tag_incest",
+      "display_name": "乱伦",
+      "slug": "incest",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 85,
+      "category": "theme",
+      "aliases": [
+        "乱伦",
+        "亂倫",
+        "近親相姦",
+        "incest"
+      ],
+      "normalized_aliases": [
+        "乱伦",
+        "亂倫",
+        "近親相姦",
+        "incest"
+      ],
+      "description": "乱伦题材",
+      "created_at": "2026-07-21T05:35:40.897313Z",
+      "updated_at": "2026-07-21T05:35:40.897318Z"
+    },
+    {
+      "tag_id": "tag_sister",
+      "display_name": "姐姐",
+      "slug": "sister",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 80,
+      "category": "theme",
+      "aliases": [
+        "姐姐",
+        "お姉さん",
+        "sister"
+      ],
+      "normalized_aliases": [
+        "姐姐",
+        "お姉さん",
+        "sister"
+      ],
+      "description": "姐姐题材",
+      "created_at": "2026-07-21T05:35:40.897322Z",
+      "updated_at": "2026-07-21T05:35:40.897325Z"
+    },
+    {
+      "tag_id": "tag_health_check",
+      "display_name": "体检",
+      "slug": "health-check",
+      "status": "approved",
+      "display_enabled": true,
+      "search_enabled": true,
+      "weight": 75,
+      "category": "theme",
+      "aliases": [
+        "体检",
+        "健康診断",
+        "medical"
+      ],
+      "normalized_aliases": [
+        "体检",
+        "健康診断",
+        "medical"
+      ],
+      "description": "体检题材",
+      "created_at": "2026-07-21T05:35:40.897331Z",
+      "updated_at": "2026-07-21T05:35:40.897333Z"
     }
   ],
   "rules": {
