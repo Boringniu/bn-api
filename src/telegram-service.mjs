@@ -123,8 +123,13 @@ export function createTelegramService({
       let reply;
       if (text === "/start" || text === "/help") {
         reply =
-          "发送演员、标签、分类或番号即可搜索。\n" +
-          "示例：希岛爱理 / 人妻 / ABP-123 / 中字";
+          "📚 命令列表\n\n" +
+          "🔍 搜索\n" +
+          "发送演员、标签、分类或番号即可搜索\n" +
+          "示例：希岛爱理 / 人妻 / ABP-123 / 中字\n\n" +
+          "/page <N> - 翻页查看更多结果\n\n" +
+          "🔧 管理（Admin Only）\n" +
+          "/refresh - 刷新频道置顶索引";
       } else if (text === "/refresh") {
         if (!isUserAdmin) {
           reply = "权限不足";
