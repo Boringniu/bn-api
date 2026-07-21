@@ -87,28 +87,17 @@ else
   echo -e "${GREEN}✓ 审核完成：$APPROVED 通过，$FAILED 失败${NC}"
 fi
 
-# ===== 刷新置顶索引 =====
 echo ""
-echo -e "${YELLOW}🔄 第 3/3 步：刷新置顶索引...${NC}"
-
-INDEX_RESPONSE=$(curl -s -X POST "$WORKER_URL/v1/channel/index" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"channel_id\":\"$CHANNEL_ID\",\"force_refresh\":true}")
-
-if echo "$INDEX_RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
-  PAGES=$(echo "$INDEX_RESPONSE" | jq '.data.pages // 1')
-  echo -e "${GREEN}✓ 索引已刷新（分 $PAGES 页）${NC}"
-else
-  echo -e "${RED}⚠️  索引刷新可能失败，请手动检查${NC}"
-fi
-
+echo -e "${GREEN}✅ v1.3.0 审核流程完成！${NC}"
 echo ""
-echo -e "${GREEN}✅ v1.3.0 重索引流程完成！${NC}"
+echo "✏️  下一步：手动编辑置顶索引"
+echo "  1. 打开 Telegram 频道（${CHANNEL_ID}）"
+echo "  2. 编辑置顶消息（融入新的演员/标签）"
+echo "  3. Bot 会自动从数据库检索 19 条新视频"
 echo ""
 echo "总结："
 echo "  • 新增演员：8 个（+ 2 个别名）"
 echo "  • 新增标签：9 个（+ 1 个别名）"
 echo "  • 新增忽略词：11 个"
 echo "  • 审核通过数：$APPROVED 条"
-echo "  • 置顶索引：已刷新"
+echo "  • 索引消息：等待手动编辑"
