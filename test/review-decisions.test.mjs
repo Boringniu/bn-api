@@ -39,7 +39,7 @@ test("approves an unambiguous actor shorthand as an alias", () => {
   );
   assert.ok(actor.aliases.some((alias) => alias.value === "三上"));
   assert.equal(result.applied[0].outcome, "actor_alias:actor_000003");
-  assert.equal(result.version, "1.3.2");
+  assert.equal(result.version, "1.3.3");
 });
 
 test("rejects a category-like tag in both relevant scopes", () => {

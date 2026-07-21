@@ -119,6 +119,7 @@ export function createWorkerApp({
           const result = await reindexCatalog({
             db: env.DB,
             ingestService,
+            searchService,
             telegramService,
             versionConfig,
             env,
@@ -295,6 +296,7 @@ async function reindexCatalog({
   db,
   env,
   ingestService,
+  searchService,
   telegramService,
   versionConfig,
 }) {
@@ -323,7 +325,7 @@ async function reindexCatalog({
         "invalid_stored_payload",
       );
     }
-    await ingestService.ingest(db, payload);
+    await ingestService.ingest(db, normalizeCatalogPayload(payload, searchService));
   }
 
   const remainingRow = await db
@@ -346,6 +348,28 @@ async function reindexCatalog({
     remaining,
     ruleset_version: versionConfig.release.version,
     index,
+  };
+}
+
+function normalizeCatalogPayload(payload, searchService) {
+  const actors = [...(payload.actors ?? [])];
+  const tags = [];
+  for (const rawTag of payload.raw_tags ?? []) {
+    const tag = rawTag.trim().replace(/[，,。.!！?？；;：:、]+$/gu, "");
+    if (!tag) {
+      continue;
+    }
+    const { resolution } = searchService.resolveQuery(tag);
+    if (resolution?.type === "actor") {
+      actors.push(resolution.display_name);
+    } else {
+      tags.push(tag);
+    }
+  }
+  return {
+    ...payload,
+    actors: [...new Set(actors)],
+    raw_tags: [...new Set(tags)],
   };
 }
 

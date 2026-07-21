@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "config_version": "1.3.1",
-  "updated_at": "2026-07-21T15:46:12Z",
+  "config_version": "1.3.2",
+  "updated_at": "2026-07-21T17:10:00Z",
   "updated_by": "admin",
   "items": [
     {
@@ -286,7 +286,8 @@
       "value": "分鍾",
       "normalized_value": "分鍾",
       "scope": [
-        "tag"
+        "tag",
+        "actor"
       ],
       "match_mode": "exact",
       "reason": "时间单位噪声词",

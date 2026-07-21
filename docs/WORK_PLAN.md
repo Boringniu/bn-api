@@ -14,7 +14,7 @@
 
 - Worker：`https://bn-api.niu900326.workers.dev`
 - D1：`bn-media`，4 个迁移已应用
-- 配置版本：`1.3.1`
+- 配置版本：`1.3.2`
 - 配置中心：9 个配置文件、对应 Schema 和 CI 校验
 
 ## 最终产品边界

@@ -230,6 +230,19 @@ export function createTelegramService({
         }
         return !sentenceLike && token.length <= 8;
       });
+      const contentTags = [];
+      for (const rawTag of parsed.raw_tags) {
+        const tag = cleanTopicValue(rawTag);
+        if (!tag) {
+          continue;
+        }
+        const { resolution } = searchService.resolveQuery(tag);
+        if (resolution?.type === "actor") {
+          actors.push(resolution.display_name);
+        } else {
+          contentTags.push(tag);
+        }
+      }
 
       // The channel owner declares default tags for everything posted here
       // (usually the category word); parsed hashtags take precedence.
@@ -237,7 +250,7 @@ export function createTelegramService({
         .split(",")
         .map((tag) => tag.trim())
         .filter(Boolean);
-      const rawTags = [...new Set([...parsed.raw_tags, ...defaultTags])];
+      const rawTags = [...new Set([...contentTags, ...defaultTags])];
 
       const payload = {
         source: {
@@ -567,7 +580,8 @@ export function parseChannelTitle(rawTitle) {
   }
 
   const raw_tags = [...title.matchAll(/#([^\s#｜|]+)/gu)]
-    .map((match) => match[1])
+    .map((match) => cleanTopicValue(match[1]))
+    .filter(Boolean)
     .slice(0, 20);
 
   const actors = firstLine
@@ -587,6 +601,10 @@ export function parseChannelTitle(rawTitle) {
   const description = restLines.join("\n").trim() || null;
 
   return { title, code, raw_tags, actors, description };
+}
+
+function cleanTopicValue(value) {
+  return value.trim().replace(/[，,。.!！?？；;：:、]+$/gu, "");
 }
 
 function chunkTags(tags) {

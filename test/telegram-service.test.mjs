@@ -52,6 +52,9 @@ test("parseChannelTitle handles the observed caption formats", () => {
   assert.deepEqual(pipes.actors, ["大槻ひびき", "波多野結衣"]);
   assert.ok(pipes.raw_tags.includes("希島あいり"));
 
+  const punctuated = parseChannelTitle("DASS-652 #姐姐, #体检， #波多野结衣");
+  assert.deepEqual(punctuated.raw_tags, ["姐姐", "体检", "波多野结衣"]);
+
   const partSuffix = parseChannelTitle("ngod-347·1");
   assert.equal(partSuffix.code, "NGOD-347");
   assert.deepEqual(partSuffix.actors, []);
