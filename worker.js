@@ -166,6 +166,8 @@ async function requestAiReply({ apiKey, temperature, systemPrompt, history }) {
     body: JSON.stringify({
       model: CONFIG.AI_MODEL,
       temperature,
+      // 留言回复不需要深度推理，关闭 Thinking 可减少延迟和额外输出。
+      thinking: { type: "disabled" },
       stream: false,
       messages: [{ role: "system", content: systemPrompt }, ...history]
     })
