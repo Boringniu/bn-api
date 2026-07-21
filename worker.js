@@ -7,6 +7,7 @@ const CONFIG = {
   MAX_REPLY_LEN: 200,
   HISTORY_MAX_MESSAGES: 10,
   HISTORY_TTL: 7200,
+  WELCOME_COOLDOWN_MS: 2 * 60 * 60 * 1000,
   TAKEOVER_TTL_MS: 20 * 60 * 1000,
   REQUEST_TIMEOUT_MS: 15000,
   botPrefix: "🫪🫪🫪🛌躺平🤦🏻摆烂🧘🫪🫪🫪",
@@ -278,7 +279,8 @@ async function handleBusinessMessage(msg, env, ADMIN_ID) {
       msgId: msg.message_id,
       businessConnId: msg.business_connection_id,
       text: userText,
-      welcomeText: CUSTOM_WELCOME_MAP[String(chatId)] || null
+      // 定制欢迎语按联系人用户 ID 匹配，不依赖聊天 ID 的具体形式。
+      welcomeText: CUSTOM_WELCOME_MAP[String(msg.from?.id)] || null
     })
   });
 
@@ -604,15 +606,21 @@ export class ChatHandler {
       return;
     }
 
-    let welcomed = (await this.state.storage.get("welcomed")) === true;
+    let welcomedAt = await this.state.storage.get("welcomedAt");
+    const legacyWelcomed = (await this.state.storage.get("welcomed")) === true;
 
-    // 兼容旧版本：已有历史的联系人视为已展示欢迎语，升级后不重复发送。
-    if (!welcomed && history.length > 0) {
-      welcomed = true;
-      await this.state.storage.put("welcomed", true);
+    // 旧版本只有永久布尔标记；升级后从当前时间开始计算两小时冷却。
+    if (!Number.isFinite(welcomedAt) && legacyWelcomed) {
+      welcomedAt = Date.now();
+      await this.state.storage.put("welcomedAt", welcomedAt);
+      await this.state.storage.delete("welcomed");
     }
 
-    if (!welcomed && processing.isAiSuccess && !processing.welcomeSent) {
+    const welcomeCooling =
+      Number.isFinite(welcomedAt) &&
+      Date.now() - welcomedAt < CONFIG.WELCOME_COOLDOWN_MS;
+
+    if (!welcomeCooling && processing.isAiSuccess && !processing.welcomeSent) {
       const firstMsg = latest.welcomeText || getRandomOpening();
       await safeSendTG(
         this.env.TG_BOT_TOKEN,
@@ -623,7 +631,7 @@ export class ChatHandler {
       );
 
       processing.welcomeSent = true;
-      await this.state.storage.put({ welcomed: true, processing });
+      await this.state.storage.put({ welcomedAt: Date.now(), processing });
     }
 
     // 欢迎语发送后也允许管理员立即接管，避免继续补发模型正文。
