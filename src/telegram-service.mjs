@@ -118,12 +118,25 @@ export function createTelegramService({
       }
       const chatId = message.chat.id;
       const userId = String(message.from?.id ?? "");
+      const isUserAdmin = isAdmin(userId, env);
 
       let reply;
       if (text === "/start" || text === "/help") {
         reply =
           "发送演员、标签、分类或番号即可搜索。\n" +
           "示例：希岛爱理 / 人妻 / ABP-123 / 中字";
+      } else if (text === "/refresh") {
+        if (!isUserAdmin) {
+          reply = "权限不足";
+        } else {
+          try {
+            await this.refreshPinnedIndex(db, env);
+            reply = "✅ 置顶索引已刷新";
+          } catch (err) {
+            console.error("refresh failed", err);
+            reply = "❌ 刷新失败：" + err.message;
+          }
+        }
       } else {
         const query = text.replace(/^\/search\s+/u, "");
         const { resolution } = searchService.resolveQuery(query);
@@ -144,7 +157,7 @@ export function createTelegramService({
 
         reply = this.renderBotResults(
           { query, ...searchResult },
-          { isAuthorized: isAdmin(userId, env) },
+          { isAuthorized: isUserAdmin },
         );
       }
 
