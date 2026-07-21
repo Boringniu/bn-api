@@ -7,7 +7,7 @@ const CONFIG = {
   MAX_REPLY_LEN: 200,
   HISTORY_MAX_MESSAGES: 10,
   HISTORY_TTL: 7200,
-  WELCOME_COOLDOWN_MS: 2 * 60 * 60 * 1000,
+  WELCOME_COOLDOWN_MS: 12 * 60 * 60 * 1000,
   TAKEOVER_TTL_MS: 20 * 60 * 1000,
   REQUEST_TIMEOUT_MS: 15000,
   botPrefix: "🫪🫪🫪🛌躺平🤦🏻摆烂🧘🫪🫪🫪",
@@ -609,7 +609,7 @@ export class ChatHandler {
     let welcomedAt = await this.state.storage.get("welcomedAt");
     const legacyWelcomed = (await this.state.storage.get("welcomed")) === true;
 
-    // 旧版本只有永久布尔标记；升级后从当前时间开始计算两小时冷却。
+    // 旧版本只有永久布尔标记；升级后从当前时间开始计算十二小时冷却。
     if (!Number.isFinite(welcomedAt) && legacyWelcomed) {
       welcomedAt = Date.now();
       await this.state.storage.put("welcomedAt", welcomedAt);
