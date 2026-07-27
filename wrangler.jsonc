@@ -3,15 +3,12 @@
   "name": "bn-api",
   "main": "src/worker.mjs",
   "compatibility_date": "2026-07-19",
-  "observability": {
-    "enabled": true
-  },
+  "workers_dev": true,
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "bn-media",
-      "database_id": "d96aa928-4441-4f39-ab46-c9cf1560c2fc",
-      "migrations_dir": "migrations"
+      "database_id": "7493f680-c243-45ab-afa7-8162738211b7"
     }
   ]
 }
