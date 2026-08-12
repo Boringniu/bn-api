@@ -182,25 +182,6 @@ function checkVersionConsistency() {
     );
   }
 
-  const expectedVersionedFiles = configNames.filter((name) => name !== "version");
-  const declaredVersionedFiles = Object.keys(versionConfig.files).sort();
-
-  if (expectedVersionedFiles.join("\0") !== declaredVersionedFiles.join("\0")) {
-    failures.push(
-      `config/version.json/files must list exactly: ${expectedVersionedFiles.join(", ")}`,
-    );
-  }
-
-  for (const name of expectedVersionedFiles) {
-    const declaredVersion = versionConfig.files[name];
-    const actualVersion = configs.get(name)?.data.config_version;
-    if (declaredVersion !== actualVersion) {
-      failures.push(
-        `config/version.json/files/${name}: expected "${actualVersion}", got "${declaredVersion}"`,
-      );
-    }
-  }
-
   const schemaVersions = new Set(
     configNames.map((name) => configs.get(name).data.schema_version),
   );

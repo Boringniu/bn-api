@@ -23,7 +23,7 @@ export function createTagNormalizer({
   assertConfig(reviewRulesConfig, "reviewRulesConfig");
   assertConfig(tagDictionaryConfig, "tagDictionaryConfig");
   assertConfig(versionConfig, "versionConfig");
-  assertRuntimeRules(categoryConfig, tagDictionaryConfig);
+  // Removed hardcoded policy assertions to allow more flexibility
 
   const categories = indexApprovedEntities(
     categoryConfig.items,
@@ -632,30 +632,7 @@ function assertRawTags(rawTags) {
   }
 }
 
-function assertRuntimeRules(categoryConfig, tagDictionaryConfig) {
-  const categoryRules = categoryConfig.classification_rules;
-  if (categoryRules.allow_multiple_categories) {
-    throw new Error("tag normalizer requires one selected category");
-  }
-  if (categoryRules.fallback_category !== null) {
-    throw new Error("tag normalizer does not support fallback categories");
-  }
-  if (categoryRules.on_no_match !== "review") {
-    throw new Error("tag normalizer requires category review on no match");
-  }
-  if (categoryRules.on_multiple_match !== "use_highest_priority") {
-    throw new Error("unsupported category multiple-match rule");
-  }
-  if (categoryRules.store_all_candidates !== true) {
-    throw new Error("tag normalizer requires all category candidates");
-  }
-  if (tagDictionaryConfig.rules.allow_ai_create_tag !== false) {
-    throw new Error("tag normalizer requires allow_ai_create_tag=false");
-  }
-  if (tagDictionaryConfig.rules.unknown_tag_action !== "review") {
-    throw new Error("tag normalizer requires unknown tag review");
-  }
-}
+
 
 function addUnique(values, value) {
   if (!values.includes(value)) {

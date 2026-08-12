@@ -8,11 +8,7 @@
     "schema_version",
     "config_version",
     "updated_at",
-    "updated_by",
-    "items",
-    "release",
-    "compatibility",
-    "files"
+    "release"
   ],
   "properties": {
     "schema_version": {
@@ -23,13 +19,6 @@
     },
     "updated_at": {
       "$ref": "#/$defs/utcDateTime"
-    },
-    "updated_by": {
-      "$ref": "#/$defs/nonEmptyString"
-    },
-    "items": {
-      "type": "array",
-      "maxItems": 0
     },
     "release": {
       "type": "object",
@@ -49,66 +38,6 @@
         },
         "description": {
           "$ref": "#/$defs/nonEmptyString"
-        }
-      }
-    },
-    "compatibility": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "minimum_worker_version",
-        "minimum_bot_version",
-        "minimum_database_schema_version"
-      ],
-      "properties": {
-        "minimum_worker_version": {
-          "$ref": "#/$defs/semver"
-        },
-        "minimum_bot_version": {
-          "$ref": "#/$defs/semver"
-        },
-        "minimum_database_schema_version": {
-          "$ref": "#/$defs/semver"
-        }
-      }
-    },
-    "files": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "category",
-        "tag_dictionary",
-        "actor_dictionary",
-        "alias",
-        "ignored",
-        "display",
-        "search",
-        "review_rules"
-      ],
-      "properties": {
-        "category": {
-          "$ref": "#/$defs/semver"
-        },
-        "tag_dictionary": {
-          "$ref": "#/$defs/semver"
-        },
-        "actor_dictionary": {
-          "$ref": "#/$defs/semver"
-        },
-        "alias": {
-          "$ref": "#/$defs/semver"
-        },
-        "ignored": {
-          "$ref": "#/$defs/semver"
-        },
-        "display": {
-          "$ref": "#/$defs/semver"
-        },
-        "search": {
-          "$ref": "#/$defs/semver"
-        },
-        "review_rules": {
-          "$ref": "#/$defs/semver"
         }
       }
     }

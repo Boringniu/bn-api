@@ -6,7 +6,6 @@
   "additionalProperties": false,
   "required": [
     "schema_version",
-    "config_version",
     "updated_at",
     "updated_by",
     "items",
@@ -17,9 +16,6 @@
   "properties": {
     "schema_version": {
       "const": "1.0"
-    },
-    "config_version": {
-      "$ref": "#/$defs/semver"
     },
     "updated_at": {
       "$ref": "#/$defs/utcDateTime"
