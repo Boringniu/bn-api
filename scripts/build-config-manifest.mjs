@@ -24,7 +24,7 @@ for (const name of [...configs.keys()].sort()) {
     name,
     path: relativePath(entry.filePath),
     schema_path: `schema/${name}.schema.json`,
-    config_version: entry.data.config_version,
+    // config_version: entry.data.config_version, // Removed per-file versioning
     sha256: createHash("sha256").update(content).digest("hex"),
     size_bytes: content.byteLength,
   });
