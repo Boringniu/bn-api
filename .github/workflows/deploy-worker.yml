@@ -56,6 +56,16 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
 
+      - name: Configure Telegram webhook update types
+        env:
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          WORKER_URL: https://bn-api.nnmmc326.workers.dev
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST "$WORKER_URL/v1/telegram/webhook" \
+            --header "Authorization: Bearer $INGEST_TOKEN" \
+            | jq '.data | {url, allowed_updates, pending_update_count}'
+
       - name: Reindex catalog and refresh pinned index
         env:
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}

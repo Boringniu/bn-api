@@ -278,6 +278,44 @@ test("bot ignores group messages", async () => {
   assert.equal(telegramCalls.length, 0);
 });
 
+test("configures webhook to receive channel posts and channel edits", async () => {
+  const telegramCalls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      const method = url.split("/").at(-1);
+      return {
+        json: async () =>
+          method === "setWebhook"
+            ? { ok: true, result: true }
+            : {
+                ok: true,
+                result: {
+                  url: "https://bn-api.nnmmc326.workers.dev/",
+                  allowed_updates: ["message", "channel_post", "edited_channel_post"],
+                  pending_update_count: 0,
+                },
+              },
+      };
+    },
+  });
+
+  const result = await service.configureWebhook(
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_WEBHOOK_SECRET: "webhook-secret" },
+    "https://bn-api.nnmmc326.workers.dev/",
+  );
+
+  assert.deepEqual(telegramCalls[0].body, {
+    url: "https://bn-api.nnmmc326.workers.dev/",
+    secret_token: "webhook-secret",
+    allowed_updates: ["message", "channel_post", "edited_channel_post"],
+  });
+  assert.ok(telegramCalls[0].url.includes("/setWebhook"));
+  assert.deepEqual(telegramCalls[1].body, {});
+  assert.ok(telegramCalls[1].url.includes("/getWebhookInfo"));
+  assert.deepEqual(result.allowed_updates, ["message", "channel_post", "edited_channel_post"]);
+});
+
 test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   const telegramCalls = [];
   const fetchImpl = async (url, init) => {

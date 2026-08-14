@@ -123,6 +123,20 @@ export function createWorkerApp({
           return jsonResponse({ ok: true }, 200, requestId);
         }
 
+        if (request.method === "POST" && url.pathname === "/v1/telegram/webhook") {
+          assertAuthorized(request, env);
+          if (!telegramService?.configureWebhook) {
+            throw new HttpError(
+              503,
+              "telegram webhook configuration is not available",
+              "service_not_configured",
+            );
+          }
+          const webhookUrl = `${url.origin}/`;
+          const result = await telegramService.configureWebhook(env, webhookUrl);
+          return jsonResponse({ data: result }, 200, requestId);
+        }
+
         if (request.method === "POST" && url.pathname === "/v1/channel/index") {
           assertAuthorized(request, env);
           assertDb(env);

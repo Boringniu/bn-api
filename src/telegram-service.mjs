@@ -399,6 +399,26 @@ export function createTelegramService({
       };
     },
 
+    async configureWebhook(env, webhookUrl) {
+      if (!webhookUrl || !/^https:\/\//u.test(webhookUrl)) {
+        throw new Error("webhook URL must use https");
+      }
+      if (!env.TELEGRAM_WEBHOOK_SECRET) {
+        throw new Error("TELEGRAM_WEBHOOK_SECRET is not configured");
+      }
+      await this.callTelegram(env, "setWebhook", {
+        url: webhookUrl,
+        secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+        allowed_updates: ["message", "channel_post", "edited_channel_post"],
+      });
+      const info = await this.callTelegram(env, "getWebhookInfo", {});
+      return {
+        url: info.url,
+        allowed_updates: info.allowed_updates ?? [],
+        pending_update_count: info.pending_update_count ?? 0,
+      };
+    },
+
     async refreshPinnedIndex(db, env) {
       const channelId = env.TELEGRAM_CHANNEL_ID;
       if (!channelId) {

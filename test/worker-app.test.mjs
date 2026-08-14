@@ -277,6 +277,62 @@ test("review action passes the authenticated role, not a client claim", async ()
   assert.equal(reviewService.actionCalls[0].options.reviewerRole, "editor");
 });
 
+test("configures Telegram webhook updates through a protected endpoint", async () => {
+  const telegramService = {
+    calls: [],
+    async configureWebhook(env, webhookUrl) {
+      this.calls.push({ env, webhookUrl });
+      return {
+        url: webhookUrl,
+        allowed_updates: ["message", "channel_post", "edited_channel_post"],
+        pending_update_count: 0,
+      };
+    },
+  };
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    telegramService,
+    versionConfig,
+  });
+
+  const response = await app.fetch(
+    new Request("https://bn-api.nnmmc326.workers.dev/v1/telegram/webhook", {
+      method: "POST",
+      headers: { authorization: "Bearer secret" },
+    }),
+    { INGEST_TOKEN: "secret" },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).data, {
+    url: "https://bn-api.nnmmc326.workers.dev/",
+    allowed_updates: ["message", "channel_post", "edited_channel_post"],
+    pending_update_count: 0,
+  });
+  assert.equal(telegramService.calls.length, 1);
+  assert.equal(telegramService.calls[0].webhookUrl, "https://bn-api.nnmmc326.workers.dev/");
+});
+
+test("rejects Telegram webhook configuration without internal authorization", async () => {
+  const telegramService = {
+    async configureWebhook() {
+      throw new Error("must not be called");
+    },
+  };
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    telegramService,
+    versionConfig,
+  });
+  const response = await app.fetch(
+    new Request("https://api.example.com/v1/telegram/webhook", { method: "POST" }),
+    { INGEST_TOKEN: "secret" },
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal((await response.json()).error.code, "unauthorized");
+});
+
 test("accepts authenticated Telegram webhooks on the root path", async () => {
   const telegramService = {
     updates: [],
