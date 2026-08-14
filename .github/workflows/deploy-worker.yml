@@ -61,10 +61,19 @@ jobs:
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
           WORKER_URL: https://bn-api.nnmmc326.workers.dev
         run: |
-          curl --fail-with-body --silent --show-error \
-            --request POST "$WORKER_URL/v1/telegram/webhook" \
-            --header "Authorization: Bearer $INGEST_TOKEN" \
-            | jq '.data | {url, allowed_updates, pending_update_count}'
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if response=$(curl --fail-with-body --silent --show-error \
+              --request POST "$WORKER_URL/v1/telegram/webhook" \
+              --header "Authorization: Bearer $INGEST_TOKEN" 2>&1); then
+              echo "$response" | jq '.data | {url, allowed_updates, pending_update_count}'
+              exit 0
+            fi
+            echo "Webhook configuration attempt $attempt/30 is waiting for the deployed Worker route: $response" >&2
+            sleep 2
+          done
+          echo "Telegram webhook configuration failed after 30 attempts." >&2
+          exit 1
 
       - name: Reindex catalog and refresh pinned index
         env:
