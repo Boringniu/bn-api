@@ -87,7 +87,10 @@ export function createWorkerApp({
           return jsonResponse({ data: result }, 200, requestId);
         }
 
-        if (request.method === "POST" && url.pathname === "/telegram/webhook") {
+        if (
+          request.method === "POST" &&
+          (url.pathname === "/telegram/webhook" || url.pathname === "/")
+        ) {
           assertTelegramWebhook(request, env);
           assertBodySize(request);
           assertDb(env);

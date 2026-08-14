@@ -277,6 +277,58 @@ test("review action passes the authenticated role, not a client claim", async ()
   assert.equal(reviewService.actionCalls[0].options.reviewerRole, "editor");
 });
 
+test("accepts authenticated Telegram webhooks on the root path", async () => {
+  const telegramService = {
+    updates: [],
+    async handleUpdate(db, update) {
+      this.updates.push({ db, update });
+    },
+  };
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService,
+    versionConfig,
+  });
+
+  const response = await app.fetch(
+    new Request("https://api.example.com/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": "webhook-secret",
+      },
+      body: JSON.stringify({ update_id: 1 }),
+    }),
+    { DB: {}, TELEGRAM_WEBHOOK_SECRET: "webhook-secret" },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(telegramService.updates.length, 1);
+});
+
+test("rejects unauthenticated Telegram webhooks on the root path", async () => {
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService: { async handleUpdate() {} },
+    versionConfig,
+  });
+  const response = await app.fetch(
+    new Request("https://api.example.com/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ update_id: 1 }),
+    }),
+    { DB: {}, TELEGRAM_WEBHOOK_SECRET: "webhook-secret" },
+  );
+
+  assert.equal(response.status, 401);
+});
+
 test("removed channel distribution routes return 404", async () => {
   const app = createWorkerApp({
     ingestService: createIngestStub(),
