@@ -101,6 +101,7 @@ export function createWorkerApp({
             path: url.pathname,
             hasMessage: Boolean(update?.message),
             hasChannelPost: Boolean(update?.channel_post),
+            hasEditedChannelPost: Boolean(update?.edited_channel_post),
           });
           // Always ack to Telegram: a thrown error would make it retry the
           // same update forever and block every later update in the queue.

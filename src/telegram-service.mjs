@@ -5,10 +5,6 @@ const TELEGRAM_API = "https://api.telegram.org";
 const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
 
-// 这是内容授权边界，而非运行时配置：频道只接受由 BN·media
-// （@niummc_bot）发送的媒体被人工转发后产生的来源记录。
-const AUTHORIZED_FORWARD_BOT_IDS = new Set(["8101858846"]);
-
 export function createTelegramService({
   categoryConfig,
   displayConfig,
@@ -111,6 +107,9 @@ export function createTelegramService({
       if (update?.channel_post) {
         return this.handleChannelPost(db, update.channel_post, env);
       }
+      if (update?.edited_channel_post) {
+        return this.handleEditedChannelPost(db, update.edited_channel_post, env);
+      }
       const message = update?.message;
       const text = message?.text?.trim();
       // 私聊 Bot 只承担番号查询；群组和频道里的普通消息不响应。
@@ -177,8 +176,8 @@ export function createTelegramService({
       return { chat_id: chatId, replied: true };
     },
 
-    // 频道只有一个：由管理员人工转发 BN·media 的内容进入这里。通过
-    // copyMessage 生成新的本地消息，剥离转发来源后才登记到影视索引。
+    // 私人频道只由管理员维护：管理员可直接发布或转发媒体，Bot 只读取
+    // 并登记到影视索引，绝不复制、删除或改写频道中的原始排版。
     async handleChannelPost(db, post, env) {
       const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
       if (String(post.chat?.id ?? "") !== channelId) {
@@ -189,58 +188,6 @@ export function createTelegramService({
         return null;
       }
 
-      const forwardSource = getForwardUserSource(post);
-      // 普通频道消息和本服务重新发布后的本地消息没有转发来源；两者都不
-      // 再处理，从而避免 copyMessage 触发无限复制或误删最终成品。
-      if (!forwardSource) {
-        return null;
-      }
-      if (!isAuthorizedForwardBot(forwardSource)) {
-        try {
-          await this.callTelegram(env, "deleteMessage", {
-            chat_id: channelId,
-            message_id: post.message_id,
-          });
-          return { rejected: "untrusted_forward", original_deleted: true };
-        } catch (error) {
-          // 没有删除权限或 Telegram 临时异常时，必须保留原消息，绝不影响
-          // 其他内容或将其写入影视库。
-          console.warn("untrusted forwarded media could not be deleted", {
-            message_id: post.message_id,
-            message: error.message,
-          });
-          return { rejected: "untrusted_forward", original_deleted: false };
-        }
-      }
-
-      const originalMessageId = post.message_id;
-      const copied = await this.callTelegram(env, "copyMessage", {
-        chat_id: channelId,
-        from_chat_id: channelId,
-        message_id: originalMessageId,
-      });
-      if (!Number.isInteger(copied?.message_id)) {
-        throw new Error("telegram copyMessage returned no message_id");
-      }
-      post = asRepublishedChannelPost(post, copied.message_id);
-
-      const deleteOriginal = async () => {
-        try {
-          await this.callTelegram(env, "deleteMessage", {
-            chat_id: channelId,
-            message_id: originalMessageId,
-          });
-          return true;
-        } catch (error) {
-          // 入库已完成时删除失败只能留下重复消息，不能回滚或删除新消息，
-          // 以避免在可恢复的 Telegram 异常中丢失资源。
-          console.warn("republished original could not be deleted", {
-            message_id: originalMessageId,
-            message: error.message,
-          });
-          return false;
-        }
-      };
 
       // 同一 Telegram 文件再次出现时只更新消息映射，避免重复建档。
       const known = await db
@@ -259,12 +206,7 @@ export function createTelegramService({
           )
           .bind(post.message_id, new Date().toISOString(), known.media_id)
           .run();
-        const originalDeleted = await deleteOriginal();
-        return {
-          remapped: known.media_id,
-          republished_message_id: post.message_id,
-          original_deleted: originalDeleted,
-        };
+        return { remapped: known.media_id };
       }
 
       const rawText = (post.caption ?? "").trim();
@@ -390,12 +332,68 @@ export function createTelegramService({
         }
       }
 
-      const originalDeleted = await deleteOriginal();
+      return { ingested: result.id, status: result.status };
+    },
+
+    // 用户直接在频道编辑已重新发布的媒体说明时，Telegram 会发送
+    // edited_channel_post。这里绝不重发或改写频道消息，只同步索引数据。
+    async handleEditedChannelPost(db, post, env) {
+      const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
+      if (String(post.chat?.id ?? "") !== channelId) {
+        return null;
+      }
+      const video = post.video ?? post.document;
+      if (!video || !ingestService) {
+        return null;
+      }
+
+      const stored = await db
+        .prepare(
+          `SELECT m.raw_payload_json
+           FROM channel_posts c
+           JOIN media m ON m.id = c.media_id
+           WHERE c.tg_chat_id = ?1 AND c.tg_message_id = ?2
+           LIMIT 1`,
+        )
+        .bind(channelId, post.message_id)
+        .first();
+      if (!stored?.raw_payload_json) {
+        // 频道中的其他手工编辑不属于影视库，不进行入库或删除操作。
+        return { ignored: "untracked_edited_media" };
+      }
+
+      let previousPayload;
+      try {
+        previousPayload = JSON.parse(stored.raw_payload_json);
+      } catch {
+        console.warn("stored channel payload is invalid", {
+          message_id: post.message_id,
+        });
+        return { ignored: "invalid_stored_payload" };
+      }
+
+      const payload = buildEditedChannelPayload({
+        previousPayload,
+        post,
+        channelId,
+        env,
+        searchService,
+      });
+      const result = await ingestService.ingest(db, payload);
+
+      if (result.status === "approved") {
+        try {
+          await this.refreshPinnedIndex(db, env);
+        } catch (error) {
+          console.warn("pinned index refresh failed after channel edit", {
+            message: error.message,
+          });
+        }
+      }
       return {
+        synchronized: post.message_id,
         ingested: result.id,
         status: result.status,
-        republished_message_id: post.message_id,
-        original_deleted: originalDeleted,
       };
     },
 
@@ -722,34 +720,82 @@ function resolutionFilters(resolution) {
   }
 }
 
-function getForwardUserSource(post) {
-  // forward_origin 是当前 Bot API 的字段；forward_from 是为了在旧投递
-  // 数据或兼容客户端中保持安全的只读回退。两者都只接受明确的用户来源。
-  if (post?.forward_origin?.type === "user") {
-    return post.forward_origin.sender_user ?? null;
-  }
-  return post?.forward_from ?? null;
-}
-
-function isAuthorizedForwardBot(source) {
-  return Boolean(
-    source?.is_bot === true && AUTHORIZED_FORWARD_BOT_IDS.has(String(source.id)),
+function buildEditedChannelPayload({
+  previousPayload,
+  post,
+  channelId,
+  env,
+  searchService,
+}) {
+  const video = post.video ?? post.document;
+  const rawText = (post.caption ?? "").trim();
+  const fileName = (video?.file_name ?? "").replace(
+    /\.(mp4|mkv|avi|wmv|ts)$/iu,
+    "",
   );
-}
-
-function asRepublishedChannelPost(post, messageId) {
-  const {
-    forward_origin,
-    forward_from,
-    forward_from_chat,
-    forward_from_message_id,
-    forward_signature,
-    forward_sender_name,
-    forward_date,
-    is_automatic_forward,
-    ...localPost
-  } = post;
-  return { ...localPost, message_id: messageId };
+  const parsed = parseChannelTitle(rawText || fileName || `视频 ${post.message_id}`);
+  const sentenceLike = /[，。！？!?,；;～~…]/u.test(
+    (rawText || fileName).split(/\n/u)[0] ?? "",
+  );
+  const actors = parsed.actors.filter((token) => {
+    const { resolution } = searchService.resolveQuery(token);
+    if (resolution?.type === "actor") {
+      return true;
+    }
+    if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(token)) {
+      return true;
+    }
+    return !sentenceLike && token.length <= 8;
+  });
+  const contentTags = [];
+  for (const rawTag of parsed.raw_tags) {
+    const tag = cleanTopicValue(rawTag);
+    if (!tag) {
+      continue;
+    }
+    const { resolution } = searchService.resolveQuery(tag);
+    if (resolution?.type === "actor") {
+      actors.push(resolution.display_name);
+    } else {
+      contentTags.push(tag);
+    }
+  }
+  const defaultTags = (env.TELEGRAM_CHANNEL_DEFAULT_TAGS ?? "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  const rawTags = [...new Set([...contentTags, ...defaultTags])];
+  const payload = {
+    ...previousPayload,
+    source: {
+      ...(previousPayload.source ?? {}),
+      provider: "channel",
+      external_id: `${channelId}:${post.message_id}`,
+    },
+    title: parsed.title,
+    raw_tags: rawTags.length > 0 ? rawTags : ["未分类"],
+    metadata: {
+      ...(previousPayload.metadata ?? {}),
+      tg_file_id: video?.file_id ?? previousPayload.metadata?.tg_file_id,
+      tg_message_id: String(post.message_id),
+    },
+  };
+  if (actors.length > 0) {
+    payload.actors = [...new Set(actors)];
+  } else {
+    delete payload.actors;
+  }
+  if (parsed.description) {
+    payload.description = parsed.description;
+  } else {
+    delete payload.description;
+  }
+  if (parsed.code) {
+    payload.code = parsed.code;
+  } else {
+    delete payload.code;
+  }
+  return payload;
 }
 
 function isAdmin(userId, env) {
