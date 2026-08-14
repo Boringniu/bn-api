@@ -5,8 +5,7 @@
   "compatibility_date": "2026-07-19",
   "workers_dev": true,
   "vars": {
-    "TELEGRAM_CHANNEL_ID": "-1004460339207",
-    "TELEGRAM_CHANNEL_DEFAULT_TAGS": "日本"
+    "TELEGRAM_CHANNEL_ID": "-1004396154285"
   },
   "d1_databases": [
     {
