@@ -338,10 +338,15 @@ async function reindexCatalog({
     .bind(versionConfig.release.version)
     .first();
   const remaining = Number(remainingRow?.total ?? 0);
+  const canRefreshTelegramIndex = Boolean(
+    env.TELEGRAM_CHANNEL_ID && env.TELEGRAM_BOT_TOKEN,
+  );
   const index =
-    remaining === 0
+    remaining === 0 && canRefreshTelegramIndex
       ? await telegramService.refreshPinnedIndex(db, env)
-      : null;
+      : remaining === 0
+        ? { outcome: "skipped", reason: "telegram_not_configured" }
+        : null;
 
   return {
     processed: rows.length,

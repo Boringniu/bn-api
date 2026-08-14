@@ -302,6 +302,41 @@ test("removed channel distribution routes return 404", async () => {
   }
 });
 
+test("reindex skips Telegram index refresh when Telegram is not configured", async () => {
+  const telegramService = {
+    refreshCalls: 0,
+    async refreshPinnedIndex() {
+      this.refreshCalls += 1;
+      return { outcome: "edited", pages: 1, message_ids: [10] };
+    },
+  };
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService,
+    versionConfig,
+  });
+
+  const response = await app.fetch(
+    new Request("https://api.example.com/v1/catalog/reindex", {
+      method: "POST",
+      headers: { authorization: "Bearer secret" },
+    }),
+    { DB: new CatalogD1([]), INGEST_TOKEN: "secret" },
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.data.processed, 0);
+  assert.equal(body.data.remaining, 0);
+  assert.deepEqual(body.data.index, {
+    outcome: "skipped",
+    reason: "telegram_not_configured",
+  });
+  assert.equal(telegramService.refreshCalls, 0);
+});
+
 test("reindexes stored payloads and refreshes the index when complete", async () => {
   const ingestService = createIngestStub({ status: "approved" });
   const telegramService = {
@@ -338,6 +373,7 @@ test("reindexes stored payloads and refreshes the index when complete", async ()
       DB: db,
       INGEST_TOKEN: "secret",
       TELEGRAM_CHANNEL_ID: "-100",
+      TELEGRAM_BOT_TOKEN: "bot-token",
     },
   );
 

@@ -41,15 +41,29 @@ jobs:
       - name: Run full validation
         run: npm run check
 
+      - name: Apply D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler d1 migrations apply bn-media --remote
+
+      - name: Sync ingest secret to Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: printf '%s' "$INGEST_TOKEN" | npx wrangler secret put INGEST_TOKEN
+
       - name: Deploy Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
 
       - name: Reindex catalog and refresh pinned index
         env:
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
-          WORKER_URL: https://bn-api.niu900326.workers.dev
+          WORKER_URL: https://bn-api.nnmmc326.workers.dev
         run: |
           for attempt in $(seq 1 100); do
             response=$(curl --fail-with-body --silent --show-error \
