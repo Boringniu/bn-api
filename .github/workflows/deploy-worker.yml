@@ -11,6 +11,7 @@ on:
       - package.json
       - package-lock.json
       - wrangler.jsonc
+      - .github/workflows/deploy-worker.yml
   workflow_dispatch:
 
 permissions:
