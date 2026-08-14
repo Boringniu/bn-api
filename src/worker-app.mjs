@@ -95,10 +95,23 @@ export function createWorkerApp({
           assertBodySize(request);
           assertDb(env);
           const update = await readJson(request);
+          console.log("telegram webhook received", {
+            requestId,
+            updateId: update?.update_id ?? null,
+            path: url.pathname,
+            hasMessage: Boolean(update?.message),
+            hasChannelPost: Boolean(update?.channel_post),
+          });
           // Always ack to Telegram: a thrown error would make it retry the
           // same update forever and block every later update in the queue.
           try {
-            await telegramService.handleUpdate(env.DB, update, env);
+            const result = await telegramService.handleUpdate(env.DB, update, env);
+            console.log("telegram webhook handled", {
+              requestId,
+              updateId: update?.update_id ?? null,
+              replied: Boolean(result?.replied),
+              handled: Boolean(result),
+            });
           } catch (error) {
             console.error("telegram update failed", {
               message: error?.message,
