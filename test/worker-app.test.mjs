@@ -365,6 +365,49 @@ test("accepts authenticated Telegram webhooks on the root path", async () => {
   assert.equal(telegramService.updates.length, 1);
 });
 
+test("audits Telegram channel updates without persisting caption content", async () => {
+  const db = new AuditD1();
+  const telegramService = {
+    async handleUpdate() {
+      return { ingested: "media_1", status: "approved" };
+    },
+  };
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService,
+    versionConfig,
+  });
+  const caption = "ADN-162 #日本 不应写入审计表";
+  const response = await app.fetch(
+    new Request("https://api.example.com/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": "webhook-secret",
+      },
+      body: JSON.stringify({
+        update_id: 88,
+        edited_channel_post: {
+          message_id: 1686,
+          chat: { id: -1004460339207 },
+          caption,
+        },
+      }),
+    }),
+    { DB: db, TELEGRAM_WEBHOOK_SECRET: "webhook-secret" },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(db.calls.length, 2);
+  const serialized = JSON.stringify(db.calls);
+  assert.match(serialized, /edited_channel_post/);
+  assert.match(serialized, /-1004460339207/);
+  assert.match(serialized, /1686/);
+  assert.doesNotMatch(serialized, new RegExp(caption));
+});
+
 test("rejects unauthenticated Telegram webhooks on the root path", async () => {
   const app = createWorkerApp({
     ingestService: createIngestStub(),
@@ -551,6 +594,25 @@ function jsonRequest(url, body, token = null) {
     headers,
     body: JSON.stringify(body),
   });
+}
+
+class AuditD1 {
+  constructor() {
+    this.calls = [];
+  }
+
+  prepare(sql) {
+    const db = this;
+    return {
+      bind(...args) {
+        db.calls.push({ sql, args });
+        return this;
+      },
+      async run() {
+        return { success: true };
+      },
+    };
+  }
 }
 
 class CatalogD1 {

@@ -105,8 +105,10 @@ export function createWorkerApp({
           });
           // Always ack to Telegram: a thrown error would make it retry the
           // same update forever and block every later update in the queue.
+          await recordTelegramUpdateAudit(env.DB, update, "received");
           try {
             const result = await telegramService.handleUpdate(env.DB, update, env);
+            await recordTelegramUpdateAudit(env.DB, update, "handled", result);
             console.log("telegram webhook handled", {
               requestId,
               updateId: update?.update_id ?? null,
@@ -114,6 +116,9 @@ export function createWorkerApp({
               handled: Boolean(result),
             });
           } catch (error) {
+            await recordTelegramUpdateAudit(env.DB, update, "failed", {
+              error: error?.message ?? "unknown error",
+            });
             console.error("telegram update failed", {
               message: error?.message,
               requestId,
@@ -407,6 +412,60 @@ function normalizeCatalogPayload(payload, searchService) {
     actors: [...new Set(actors)],
     raw_tags: [...new Set(tags)],
   };
+}
+
+async function recordTelegramUpdateAudit(db, update, outcome, result = null) {
+  // The audit intentionally excludes captions, titles, filenames, sender data,
+  // and media identifiers. It only answers whether a Telegram update arrived
+  // and whether the record-only handler completed.
+  if (!db?.prepare || !Number.isInteger(update?.update_id)) {
+    return;
+  }
+  const post = update.channel_post ?? update.edited_channel_post ?? update.message;
+  const updateType = update.edited_channel_post
+    ? "edited_channel_post"
+    : update.channel_post
+      ? "channel_post"
+      : update.message
+        ? "message"
+        : "other";
+  const safeDetail = result
+    ? JSON.stringify({
+        handled: Boolean(result),
+        ingested: Boolean(result?.ingested),
+        synchronized: Boolean(result?.synchronized),
+        remapped: Boolean(result?.remapped),
+        ignored: result?.ignored ?? null,
+        error: result?.error ?? null,
+      })
+    : null;
+  const now = new Date().toISOString();
+  try {
+    await db
+      .prepare(
+        `INSERT INTO telegram_update_audit (
+           update_id, update_type, chat_id, message_id, outcome, detail, received_at, handled_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(update_id) DO UPDATE SET
+           outcome = excluded.outcome,
+           detail = excluded.detail,
+           handled_at = excluded.handled_at`,
+      )
+      .bind(
+        update.update_id,
+        updateType,
+        post?.chat?.id ? String(post.chat.id) : null,
+        post?.message_id ?? null,
+        outcome,
+        safeDetail,
+        now,
+        outcome === "received" ? null : now,
+      )
+      .run();
+  } catch (error) {
+    // Auditing can never disrupt Telegram acknowledgement or media indexing.
+    console.warn("telegram update audit failed", { message: error?.message });
+  }
 }
 
 function assertReviewer(request, env) {
