@@ -5,6 +5,10 @@ const TELEGRAM_API = "https://api.telegram.org";
 const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
 
+// 这是内容授权边界，而非运行时配置：频道只接受由 BN·media
+// （@niummc_bot）发送的媒体被人工转发后产生的来源记录。
+const AUTHORIZED_FORWARD_BOT_IDS = new Set(["8101858846"]);
+
 export function createTelegramService({
   categoryConfig,
   displayConfig,
@@ -173,8 +177,8 @@ export function createTelegramService({
       return { chat_id: chatId, replied: true };
     },
 
-    // 频道原视频是唯一内容来源：这里只读取并登记编目信息，绝不修改、
-    // 复制、删除或重新发送视频消息。
+    // 频道只有一个：由管理员人工转发 BN·media 的内容进入这里。通过
+    // copyMessage 生成新的本地消息，剥离转发来源后才登记到影视索引。
     async handleChannelPost(db, post, env) {
       const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
       if (String(post.chat?.id ?? "") !== channelId) {
@@ -184,6 +188,59 @@ export function createTelegramService({
       if (!video || !ingestService) {
         return null;
       }
+
+      const forwardSource = getForwardUserSource(post);
+      // 普通频道消息和本服务重新发布后的本地消息没有转发来源；两者都不
+      // 再处理，从而避免 copyMessage 触发无限复制或误删最终成品。
+      if (!forwardSource) {
+        return null;
+      }
+      if (!isAuthorizedForwardBot(forwardSource)) {
+        try {
+          await this.callTelegram(env, "deleteMessage", {
+            chat_id: channelId,
+            message_id: post.message_id,
+          });
+          return { rejected: "untrusted_forward", original_deleted: true };
+        } catch (error) {
+          // 没有删除权限或 Telegram 临时异常时，必须保留原消息，绝不影响
+          // 其他内容或将其写入影视库。
+          console.warn("untrusted forwarded media could not be deleted", {
+            message_id: post.message_id,
+            message: error.message,
+          });
+          return { rejected: "untrusted_forward", original_deleted: false };
+        }
+      }
+
+      const originalMessageId = post.message_id;
+      const copied = await this.callTelegram(env, "copyMessage", {
+        chat_id: channelId,
+        from_chat_id: channelId,
+        message_id: originalMessageId,
+      });
+      if (!Number.isInteger(copied?.message_id)) {
+        throw new Error("telegram copyMessage returned no message_id");
+      }
+      post = asRepublishedChannelPost(post, copied.message_id);
+
+      const deleteOriginal = async () => {
+        try {
+          await this.callTelegram(env, "deleteMessage", {
+            chat_id: channelId,
+            message_id: originalMessageId,
+          });
+          return true;
+        } catch (error) {
+          // 入库已完成时删除失败只能留下重复消息，不能回滚或删除新消息，
+          // 以避免在可恢复的 Telegram 异常中丢失资源。
+          console.warn("republished original could not be deleted", {
+            message_id: originalMessageId,
+            message: error.message,
+          });
+          return false;
+        }
+      };
 
       // 同一 Telegram 文件再次出现时只更新消息映射，避免重复建档。
       const known = await db
@@ -202,7 +259,12 @@ export function createTelegramService({
           )
           .bind(post.message_id, new Date().toISOString(), known.media_id)
           .run();
-        return { remapped: known.media_id };
+        const originalDeleted = await deleteOriginal();
+        return {
+          remapped: known.media_id,
+          republished_message_id: post.message_id,
+          original_deleted: originalDeleted,
+        };
       }
 
       const rawText = (post.caption ?? "").trim();
@@ -328,7 +390,13 @@ export function createTelegramService({
         }
       }
 
-      return { ingested: result.id, status: result.status };
+      const originalDeleted = await deleteOriginal();
+      return {
+        ingested: result.id,
+        status: result.status,
+        republished_message_id: post.message_id,
+        original_deleted: originalDeleted,
+      };
     },
 
     async refreshPinnedIndex(db, env) {
@@ -652,6 +720,36 @@ function resolutionFilters(resolution) {
     default:
       return {};
   }
+}
+
+function getForwardUserSource(post) {
+  // forward_origin 是当前 Bot API 的字段；forward_from 是为了在旧投递
+  // 数据或兼容客户端中保持安全的只读回退。两者都只接受明确的用户来源。
+  if (post?.forward_origin?.type === "user") {
+    return post.forward_origin.sender_user ?? null;
+  }
+  return post?.forward_from ?? null;
+}
+
+function isAuthorizedForwardBot(source) {
+  return Boolean(
+    source?.is_bot === true && AUTHORIZED_FORWARD_BOT_IDS.has(String(source.id)),
+  );
+}
+
+function asRepublishedChannelPost(post, messageId) {
+  const {
+    forward_origin,
+    forward_from,
+    forward_from_chat,
+    forward_from_message_id,
+    forward_signature,
+    forward_sender_name,
+    forward_date,
+    is_automatic_forward,
+    ...localPost
+  } = post;
+  return { ...localPost, message_id: messageId };
 }
 
 function isAdmin(userId, env) {

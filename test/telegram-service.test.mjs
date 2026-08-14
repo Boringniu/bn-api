@@ -361,6 +361,10 @@ test("approved channel video refreshes the index automatically", async () => {
       channel_post: {
         chat: { id: -100 },
         message_id: 9,
+        forward_origin: {
+          type: "user",
+          sender_user: { id: 8101858846, is_bot: true },
+        },
         video: { file_id: "F", file_name: "ABP-123.mp4" },
       },
     },
@@ -373,7 +377,7 @@ test("approved channel video refreshes the index automatically", async () => {
   );
 });
 
-test("channel video is catalogued without changing or reposting it", async () => {
+test("authorized forwarded channel video is republished, catalogued, then cleans up the original", async () => {
   const ingestCalls = [];
   const telegramCalls = [];
   const service = createTelegramService({
@@ -396,7 +400,13 @@ test("channel video is catalogued without changing or reposting it", async () =>
     versionConfig,
     fetchImpl: async (url, init) => {
       telegramCalls.push({ url, body: JSON.parse(init.body) });
-      return { json: async () => ({ ok: true, result: {} }) };
+      const method = url.split("/").at(-1);
+      return {
+        json: async () => ({
+          ok: true,
+          result: method === "copyMessage" ? { message_id: 100 } : { message_id: 101 },
+        }),
+      };
     },
   });
   const db = new FakeD1();
@@ -407,7 +417,13 @@ test("channel video is catalogued without changing or reposting it", async () =>
       channel_post: {
         chat: { id: -1004460339207 },
         message_id: 99,
-        caption: "ABP-123 希島あいり",
+        forward_origin: {
+          type: "user",
+          sender_user: { id: 8101858846, is_bot: true },
+        },
+        caption:
+          "ABP-123 #中文字幕 #人妻 希島あいり｜波多野結衣\n\n剧情简介\n第一行保留排版\n第二行保留排版",
+        caption_entities: [{ offset: 0, length: 7, type: "bold" }],
         video: { file_id: "VIDFILE", file_name: "ABP-123.mp4" },
       },
     },
@@ -419,33 +435,171 @@ test("channel video is catalogued without changing or reposting it", async () =>
   );
 
   assert.equal(result.ingested, "media_new");
+  assert.equal(result.republished_message_id, 100);
+  assert.equal(result.original_deleted, true);
   assert.equal(ingestCalls[0].code, "ABP-123");
   assert.equal(ingestCalls[0].source.provider, "channel");
+  assert.equal(
+    ingestCalls[0].title,
+    "ABP-123 #中文字幕 #人妻 希島あいり｜波多野結衣\n\n剧情简介\n第一行保留排版\n第二行保留排版",
+  );
+  assert.equal(
+    ingestCalls[0].description,
+    "剧情简介\n第一行保留排版\n第二行保留排版",
+  );
+  assert.ok(ingestCalls[0].raw_tags.includes("中文字幕"));
+  assert.ok(ingestCalls[0].raw_tags.includes("人妻"));
   assert.ok(ingestCalls[0].raw_tags.includes("日本"), "default tag applied");
-  assert.deepEqual(ingestCalls[0].actors, ["希島あいり"]);
+  assert.deepEqual(ingestCalls[0].actors, ["希島あいり", "波多野結衣"]);
   assert.equal(ingestCalls[0].metadata.tg_file_id, "VIDFILE");
+  assert.equal(ingestCalls[0].metadata.tg_message_id, "100");
   assert.ok(
     db.statements.some((s) => s.sql.includes("INSERT INTO media_files")),
   );
   assert.ok(
     db.statements.some((s) => s.sql.includes("INSERT INTO channel_posts")),
   );
-  const forbiddenMethods = [
-    "editMessageCaption",
-    "copyMessage",
-    "deleteMessage",
-    "sendVideo",
-  ];
-  for (const method of forbiddenMethods) {
-    assert.ok(
-      !telegramCalls.some((call) => call.url.includes(`/${method}`)),
-      `${method} must never be used during channel ingest`,
-    );
-  }
+  const copyCall = telegramCalls.find((call) => call.url.includes("/copyMessage"));
+  assert.ok(copyCall, "authorized forwarded media must be copied as a local channel message");
+  assert.deepEqual(copyCall.body, {
+    chat_id: "-1004460339207",
+    from_chat_id: "-1004460339207",
+    message_id: 99,
+  });
+  assert.ok(
+    !Object.hasOwn(copyCall.body, "caption"),
+    "server-side copy must preserve the original caption and entities instead of rewriting them",
+  );
+  assert.ok(
+    telegramCalls.some((call) => call.url.includes("/deleteMessage")),
+    "the original forwarded message must be cleaned up after ingest succeeds",
+  );
   assert.ok(
     telegramCalls.some((call) => call.url.includes("/sendMessage")),
     "approved ingest should still maintain the pinned index",
   );
+});
+
+test("untrusted forwarded channel media is deleted without copying or cataloguing", async () => {
+  const telegramCalls = [];
+  const ingestCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "should_not_exist", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+
+  const result = await service.handleUpdate(
+    new FakeD1(),
+    {
+      channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 123,
+        forward_origin: {
+          type: "user",
+          sender_user: { id: 123456789, is_bot: true },
+        },
+        video: { file_id: "UNTRUSTED", file_name: "bad.mp4" },
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-1004460339207" },
+  );
+
+  assert.deepEqual(result, { rejected: "untrusted_forward", original_deleted: true });
+  assert.equal(ingestCalls.length, 0);
+  assert.equal(telegramCalls.length, 1);
+  assert.ok(telegramCalls[0].url.includes("/deleteMessage"));
+  assert.equal(telegramCalls[0].body.message_id, 123);
+});
+
+test("local channel media without a forward origin is ignored to prevent a repost loop", async () => {
+  const telegramCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: { async ingest() { throw new Error("must not ingest"); } },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: {} }) };
+    },
+  });
+
+  const result = await service.handleUpdate(
+    new FakeD1(),
+    {
+      channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 124,
+        video: { file_id: "LOCAL", file_name: "local.mp4" },
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-1004460339207" },
+  );
+
+  assert.equal(result, null);
+  assert.equal(telegramCalls.length, 0);
+});
+
+test("authorized media remains available when original cleanup is denied", async () => {
+  const telegramCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest() {
+        return { id: "media_keep", status: "pending" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      const method = url.split("/").at(-1);
+      return {
+        json: async () =>
+          method === "deleteMessage"
+            ? { ok: false, description: "not enough rights" }
+            : { ok: true, result: { message_id: 125 } },
+      };
+    },
+  });
+
+  const result = await service.handleUpdate(
+    new FakeD1(),
+    {
+      channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 126,
+        forward_origin: {
+          type: "user",
+          sender_user: { id: 8101858846, is_bot: true },
+        },
+        video: { file_id: "KEEP", file_name: "keep.mp4" },
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-1004460339207" },
+  );
+
+  assert.equal(result.ingested, "media_keep");
+  assert.equal(result.original_deleted, false);
+  assert.ok(telegramCalls.some((call) => call.url.includes("/copyMessage")));
+  assert.ok(telegramCalls.some((call) => call.url.includes("/deleteMessage")));
 });
 
 test("channel posts from other chats and non-videos are ignored", async () => {
