@@ -47,13 +47,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler d1 migrations apply bn-media --remote
 
-      - name: Sync ingest secret to Worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
-        run: printf '%s' "$INGEST_TOKEN" | npx wrangler secret put INGEST_TOKEN
-
+      # INGEST_TOKEN 已在 Cloudflare Dashboard 的 Worker Secret 中配置；
+      # Wrangler 部署会保留既有 Secret，不在 CI 中重复写入，以避免版本化 Worker 冲突。
       - name: Deploy Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
