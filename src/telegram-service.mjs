@@ -358,8 +358,10 @@ export function createTelegramService({
         .bind(channelId, post.message_id)
         .first();
       if (!stored?.raw_payload_json) {
-        // 频道中的其他手工编辑不属于影视库，不进行入库或删除操作。
-        return { ignored: "untracked_edited_media" };
+        // Worker 上线前已存在的私人频道媒体不会补发 channel_post，只会在
+        // 用户编辑时产生 edited_channel_post。私人频道由管理员独占维护，
+        // 因此可安全地把这次编辑作为首次入库入口；仍不复制、删除或改写。
+        return this.handleChannelPost(db, post, env);
       }
 
       let previousPayload;

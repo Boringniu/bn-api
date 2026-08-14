@@ -567,12 +567,18 @@ test("editing an indexed channel video synchronizes catalog metadata without rep
   );
 });
 
-test("editing an untracked channel video is ignored without catalog or Telegram changes", async () => {
+test("editing an unmapped private-channel video imports it without reposting", async () => {
   const telegramCalls = [];
+  const ingestCalls = [];
   const service = createTelegramService({
     categoryConfig: configs.get("category").data,
     displayConfig,
-    ingestService: { async ingest() { throw new Error("must not ingest"); } },
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_backfill", status: "pending" };
+      },
+    },
     searchConfig: configs.get("search").data,
     searchService: createSearchStub(),
     versionConfig,
@@ -595,8 +601,15 @@ test("editing an untracked channel video is ignored without catalog or Telegram 
     { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-1004460339207" },
   );
 
-  assert.deepEqual(result, { ignored: "untracked_edited_media" });
-  assert.equal(telegramCalls.length, 0);
+  assert.deepEqual(result, { ingested: "media_backfill", status: "pending" });
+  assert.equal(ingestCalls[0].code, "ADN-999");
+  assert.ok(ingestCalls[0].raw_tags.includes("测试"));
+  assert.ok(
+    !telegramCalls.some((call) =>
+      /\/(copyMessage|deleteMessage|editMessageCaption)$/u.test(call.url),
+    ),
+    "first-edit import must leave the channel media untouched",
+  );
 });
 
 test("direct private-channel media without a forward origin is catalogued", async () => {
