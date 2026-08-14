@@ -716,6 +716,85 @@ test("channel posts from other chats and non-videos are ignored", async () => {
   );
 });
 
+test("inherits hashtags from a preceding channel context message", async () => {
+  const ingestCalls = [];
+  const context = {
+    message_id: 500,
+    code: "ADN-100",
+    raw_tags: ["松下纱荣子"],
+  };
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_context", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+  });
+  const db = new FakeD1({
+    firstResults: [null, { value: JSON.stringify(context) }, null, null],
+  });
+
+  await service.handleUpdate(
+    db,
+    {
+      channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 501,
+        video: { file_id: "CONTEXT", file_name: "ADN-100-1.mp4" },
+      },
+    },
+    { TELEGRAM_CHANNEL_ID: "-1004460339207" },
+  );
+
+  assert.equal(ingestCalls[0].code, "ADN-100");
+  assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
+});
+
+test("preserves an actor-name hashtag as a normal topic", async () => {
+  const ingestCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_topic", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub({
+      resolution: {
+        type: "actor",
+        actor_id: "actor_000001",
+        display_name: "松下纱荣子",
+      },
+    }),
+    versionConfig,
+  });
+
+  await service.handleUpdate(
+    new FakeD1(),
+    {
+      channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 502,
+        caption: "ADN-100 #松下纱荣子",
+        video: { file_id: "TOPIC", file_name: "ADN-100.mp4" },
+      },
+    },
+    { TELEGRAM_CHANNEL_ID: "-1004460339207" },
+  );
+
+  assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
+  assert.equal("actors" in ingestCalls[0], false);
+});
+
 function createSearchStub({ resolution = null, media = [] } = {}) {
   return {
     findCalls: [],

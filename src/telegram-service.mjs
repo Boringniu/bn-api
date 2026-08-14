@@ -4,6 +4,8 @@ const TELEGRAM_API = "https://api.telegram.org";
 // Telegram hard limit is 4096 chars per message; leave headroom.
 const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
+const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
+const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 
 export function createTelegramService({
   categoryConfig,
@@ -180,11 +182,13 @@ export function createTelegramService({
       if (String(post.chat?.id ?? "") !== channelId) {
         return null;
       }
-      const video = post.video ?? post.document;
-      if (!video || !ingestService) {
+      const video = resolveTelegramMedia(post);
+      if (!video) {
+        return storePendingChannelContext(db, post, channelId);
+      }
+      if (!ingestService) {
         return null;
       }
-
 
       // 同一 Telegram 文件再次出现时只更新消息映射，避免重复建档。
       const known = await db
@@ -206,7 +210,7 @@ export function createTelegramService({
         return { remapped: known.media_id };
       }
 
-      const rawText = (post.caption ?? "").trim();
+      const rawText = readPostText(post);
       const fileName = (video.file_name ?? "").replace(
         /\.(mp4|mkv|avi|wmv|ts)$/iu,
         "",
@@ -231,22 +235,18 @@ export function createTelegramService({
         }
         return !sentenceLike && token.length <= 8;
       });
-      const contentTags = [];
-      for (const rawTag of parsed.raw_tags) {
-        const tag = cleanTopicValue(rawTag);
-        if (!tag) {
-          continue;
-        }
-        const { resolution } = searchService.resolveQuery(tag);
-        if (resolution?.type === "actor") {
-          actors.push(resolution.display_name);
-        } else {
-          contentTags.push(tag);
-        }
-      }
+      const contentTags = parsed.raw_tags
+        .map(cleanTopicValue)
+        .filter(Boolean);
+      const inheritedContext =
+        contentTags.length === 0
+          ? await readPendingChannelContext(db, channelId, post.message_id, parsed.code)
+          : null;
 
-      // 所有 #话题 都是可选的平级元数据；不再注入频道默认分类。
-      const rawTags = [...new Set(contentTags)];
+      // 所有 #话题 都是平级元数据；即便标签恰好是演员名，也必须保留为话题。
+      const rawTags = [
+        ...new Set([...contentTags, ...(inheritedContext?.raw_tags ?? [])]),
+      ];
 
       const payload = {
         source: {
@@ -266,8 +266,8 @@ export function createTelegramService({
       if (parsed.description) {
         payload.description = parsed.description;
       }
-      if (parsed.code) {
-        payload.code = parsed.code;
+      if (parsed.code ?? inheritedContext?.code) {
+        payload.code = parsed.code ?? inheritedContext.code;
       }
 
       const result = await ingestService.ingest(db, payload);
@@ -691,6 +691,79 @@ function chunkTags(tags) {
   return lines;
 }
 
+function resolveTelegramMedia(post) {
+  return post.video ?? post.document ?? post.animation ?? post.video_note ?? null;
+}
+
+function readPostText(post) {
+  if (typeof post.caption === "string") {
+    return post.caption.trim();
+  }
+  return typeof post.text === "string" ? post.text.trim() : "";
+}
+
+function pendingChannelContextKey(channelId) {
+  return `${PENDING_CHANNEL_CONTEXT_PREFIX}${channelId}`;
+}
+
+async function storePendingChannelContext(db, post, channelId) {
+  const rawText = readPostText(post);
+  if (!rawText) {
+    return null;
+  }
+  const parsed = parseChannelTitle(rawText);
+  if (!parsed.code && parsed.raw_tags.length === 0) {
+    return null;
+  }
+  const context = {
+    message_id: post.message_id,
+    code: parsed.code,
+    raw_tags: parsed.raw_tags,
+    recorded_at: new Date().toISOString(),
+  };
+  await db
+    .prepare(
+      `INSERT INTO database_metadata (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT (key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      pendingChannelContextKey(channelId),
+      JSON.stringify(context),
+      context.recorded_at,
+    )
+    .run();
+  return { context_stored: true };
+}
+
+async function readPendingChannelContext(db, channelId, messageId, code) {
+  const key = pendingChannelContextKey(channelId);
+  const row = await db
+    .prepare("SELECT value FROM database_metadata WHERE key = ?")
+    .bind(key)
+    .first();
+  if (!row?.value) {
+    return null;
+  }
+  try {
+    const context = JSON.parse(row.value);
+    const messageDistance = Number(messageId) - Number(context.message_id);
+    const isNear =
+      Number.isInteger(messageDistance) &&
+      messageDistance > 0 &&
+      messageDistance <= PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW;
+    const codeMatches = Boolean(code && context.code && code === context.code);
+    if (!isNear || !codeMatches || !Array.isArray(context.raw_tags)) {
+      return null;
+    }
+    return context;
+  } catch {
+    return null;
+  }
+}
+
 async function readIndexMessageIds(db) {
   const row = await db
     .prepare("SELECT value FROM database_metadata WHERE key = ?")
@@ -738,7 +811,7 @@ function buildEditedChannelPayload({
   searchService,
 }) {
   const video = post.video ?? post.document;
-  const rawText = (post.caption ?? "").trim();
+  const rawText = readPostText(post);
   const fileName = (video?.file_name ?? "").replace(
     /\.(mp4|mkv|avi|wmv|ts)$/iu,
     "",
@@ -757,19 +830,9 @@ function buildEditedChannelPayload({
     }
     return !sentenceLike && token.length <= 8;
   });
-  const contentTags = [];
-  for (const rawTag of parsed.raw_tags) {
-    const tag = cleanTopicValue(rawTag);
-    if (!tag) {
-      continue;
-    }
-    const { resolution } = searchService.resolveQuery(tag);
-    if (resolution?.type === "actor") {
-      actors.push(resolution.display_name);
-    } else {
-      contentTags.push(tag);
-    }
-  }
+  const contentTags = parsed.raw_tags
+    .map(cleanTopicValue)
+    .filter(Boolean);
   const rawTags = [...new Set(contentTags)];
   const payload = {
     ...previousPayload,

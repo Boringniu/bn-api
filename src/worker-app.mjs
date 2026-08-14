@@ -361,7 +361,7 @@ async function reindexCatalog({
         "invalid_stored_payload",
       );
     }
-    await ingestService.ingest(db, normalizeCatalogPayload(payload, searchService));
+    await ingestService.ingest(db, normalizeCatalogPayload(payload));
   }
 
   const remainingRow = await db
@@ -392,24 +392,13 @@ async function reindexCatalog({
   };
 }
 
-function normalizeCatalogPayload(payload, searchService) {
-  const actors = [...(payload.actors ?? [])];
-  const tags = [];
-  for (const rawTag of payload.raw_tags ?? []) {
-    const tag = rawTag.trim().replace(/[，,。.!！?？；;：:、]+$/gu, "");
-    if (!tag) {
-      continue;
-    }
-    const { resolution } = searchService.resolveQuery(tag);
-    if (resolution?.type === "actor") {
-      actors.push(resolution.display_name);
-    } else {
-      tags.push(tag);
-    }
-  }
+function normalizeCatalogPayload(payload) {
+  const tags = (payload.raw_tags ?? [])
+    .map((rawTag) => rawTag.trim().replace(/[，,。.!！?？；;：:、]+$/gu, ""))
+    .filter(Boolean);
   return {
     ...payload,
-    actors: [...new Set(actors)],
+    actors: [...new Set(payload.actors ?? [])],
     raw_tags: [...new Set(tags)],
   };
 }
@@ -429,16 +418,20 @@ async function recordTelegramUpdateAudit(db, update, outcome, result = null) {
       : update.message
         ? "message"
         : "other";
-  const safeDetail = result
-    ? JSON.stringify({
-        handled: Boolean(result),
-        ingested: Boolean(result?.ingested),
-        synchronized: Boolean(result?.synchronized),
-        remapped: Boolean(result?.remapped),
-        ignored: result?.ignored ?? null,
-        error: result?.error ?? null,
-      })
-    : null;
+  const safeDetail = JSON.stringify({
+    media_kind: telegramMediaKind(post),
+    has_caption: Boolean(post?.caption),
+    has_text: Boolean(post?.text),
+    caption_hashtag_count: countHashtags(post?.caption ?? post?.text),
+    has_media_group: Boolean(post?.media_group_id),
+    is_forwarded: Boolean(post?.forward_origin ?? post?.forward_from),
+    handled: Boolean(result),
+    ingested: Boolean(result?.ingested),
+    synchronized: Boolean(result?.synchronized),
+    remapped: Boolean(result?.remapped),
+    ignored: result?.ignored ?? null,
+    error: result?.error ?? null,
+  });
   const now = new Date().toISOString();
   try {
     await db
@@ -466,6 +459,25 @@ async function recordTelegramUpdateAudit(db, update, outcome, result = null) {
     // Auditing can never disrupt Telegram acknowledgement or media indexing.
     console.warn("telegram update audit failed", { message: error?.message });
   }
+}
+
+function telegramMediaKind(post) {
+  if (!post) {
+    return null;
+  }
+  for (const type of ["video", "document", "animation", "video_note"]) {
+    if (post[type]) {
+      return type;
+    }
+  }
+  return null;
+}
+
+function countHashtags(value) {
+  if (typeof value !== "string") {
+    return 0;
+  }
+  return [...value.matchAll(/#[^\s#｜|]+/gu)].length;
 }
 
 function assertReviewer(request, env) {
