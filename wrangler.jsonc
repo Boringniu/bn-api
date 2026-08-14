@@ -5,7 +5,8 @@
   "compatibility_date": "2026-07-19",
   "workers_dev": true,
   "vars": {
-    "TELEGRAM_CHANNEL_ID": "-1004396154285"
+    "TELEGRAM_CHANNEL_ID": "-1004396154285",
+    "TELEGRAM_STRIP_FORWARD_SOURCE": "true"
   },
   "d1_databases": [
     {

@@ -144,6 +144,78 @@ test("bot results include code and hide source links from strangers", () => {
   assert.ok(adminText.includes("https://example.com/secret"));
 });
 
+test("bot results aggregate multiple videos under one code", () => {
+  const text = createService().renderBotResults({
+    page: 1,
+    page_size: 10,
+    total: 1,
+    results: [{ ...sampleMedia, video_count: 3 }],
+  });
+
+  assert.equal((text.match(/ABP-123/gu) ?? []).length, 1);
+  assert.ok(text.includes("（3 个视频）"));
+});
+
+test("strips forwarded source by copying before deleting the original", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      calls.push({ method, payload: JSON.parse(init.body) });
+      return {
+        json: async () => ({
+          ok: true,
+          result: method === "copyMessage" ? { message_id: 88 } : true,
+        }),
+      };
+    },
+  });
+
+  const copied = await service.stripForwardSource(
+    { message_id: 77, forward_origin: { type: "channel" } },
+    "-1004396154285",
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_STRIP_FORWARD_SOURCE: "true" },
+  );
+
+  assert.equal(copied.message_id, 88);
+  assert.deepEqual(calls.map((call) => call.method), ["copyMessage", "deleteMessage"]);
+  assert.equal(calls[0].payload.message_id, 77);
+  assert.equal(calls[1].payload.message_id, 77);
+});
+
+test("rolls back the copy when deleting the forwarded original fails", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      const payload = JSON.parse(init.body);
+      calls.push({ method, payload });
+      if (method === "copyMessage") {
+        return { json: async () => ({ ok: true, result: { message_id: 88 } }) };
+      }
+      if (method === "deleteMessage" && payload.message_id === 77) {
+        return { json: async () => ({ ok: false, description: "not allowed" }) };
+      }
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+
+  await assert.rejects(
+    () => service.stripForwardSource(
+      { message_id: 77, forward_origin: { type: "channel" } },
+      "-1004396154285",
+      { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_STRIP_FORWARD_SOURCE: "true" },
+    ),
+    /deleteMessage failed/,
+  );
+  assert.deepEqual(calls.map((call) => call.method), [
+    "copyMessage",
+    "deleteMessage",
+    "deleteMessage",
+  ]);
+  assert.equal(calls[2].payload.message_id, 88);
+});
+
 test("webhook update runs a search, logs it, and replies", async () => {
   const searchService = createSearchStub({
     resolution: { type: "code", match: "exact", code: "ABP-123" },

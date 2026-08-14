@@ -94,6 +94,9 @@ export function createTelegramService({
               .join(" "),
           );
         }
+        if (Number(media.video_count ?? 1) > 1) {
+          parts.push(`（${media.video_count} 个视频）`);
+        }
         lines.push(parts.join(" "));
         if (botResult.show_source_link && isAuthorized && media.source_url) {
           lines.push(media.source_url);
@@ -175,16 +178,28 @@ export function createTelegramService({
       return { chat_id: chatId, replied: true };
     },
 
-    // 私人频道只由管理员维护：管理员可直接发布或转发媒体，Bot 只读取
-    // 并登记到影视索引，绝不复制、删除或改写频道中的原始排版。
+    // 私人频道只由管理员维护：原生发布直接入库；经授权的转发则复制为
+    // 无来源副本并删除原转发，再对副本建立索引。
     async handleChannelPost(db, post, env) {
       const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
       if (String(post.chat?.id ?? "") !== channelId) {
         return null;
       }
+      const stripped = await this.stripForwardSource(post, channelId, env);
+      if (stripped) {
+        post = {
+          ...post,
+          message_id: stripped.message_id,
+          forward_origin: null,
+          forward_from: null,
+        };
+      }
       const video = resolveTelegramMedia(post);
       if (!video) {
-        return storePendingChannelContext(db, post, channelId);
+        const context = await storePendingChannelContext(db, post, channelId);
+        return stripped
+          ? { ...(context ?? {}), source_stripped: true, copied_message_id: post.message_id }
+          : context;
       }
       if (!ingestService) {
         return null;
@@ -324,7 +339,41 @@ export function createTelegramService({
         }
       }
 
-      return { ingested: result.id, status: result.status };
+      const outcome = { ingested: result.id, status: result.status };
+      if (stripped) {
+        outcome.source_stripped = true;
+        outcome.copied_message_id = stripped.message_id;
+      }
+      return outcome;
+    },
+
+    async stripForwardSource(post, channelId, env) {
+      if (!shouldStripForwardSource(post, env)) {
+        return null;
+      }
+      const copied = await this.callTelegram(env, "copyMessage", {
+        chat_id: channelId,
+        from_chat_id: channelId,
+        message_id: post.message_id,
+      });
+      try {
+        await this.callTelegram(env, "deleteMessage", {
+          chat_id: channelId,
+          message_id: post.message_id,
+        });
+      } catch (error) {
+        // 删除原转发失败时撤回副本，宁可保留带来源的原消息，也不制造重复内容。
+        try {
+          await this.callTelegram(env, "deleteMessage", {
+            chat_id: channelId,
+            message_id: copied.message_id,
+          });
+        } catch {
+          // 保留原始错误供 webhook 审计，回滚失败只记录在 Worker 日志中。
+        }
+        throw error;
+      }
+      return copied;
     },
 
     // 用户直接在频道编辑已重新发布的媒体说明时，Telegram 会发送
@@ -693,6 +742,13 @@ function chunkTags(tags) {
 
 function resolveTelegramMedia(post) {
   return post.video ?? post.document ?? post.animation ?? post.video_note ?? null;
+}
+
+function shouldStripForwardSource(post, env) {
+  return (
+    String(env?.TELEGRAM_STRIP_FORWARD_SOURCE ?? "").toLowerCase() === "true" &&
+    Boolean(post?.forward_origin ?? post?.forward_from)
+  );
 }
 
 function readPostText(post) {

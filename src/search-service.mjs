@@ -99,16 +99,20 @@ export function createSearchService({
         : "";
       const limit = Math.min(size, search.max_result_count - offset);
 
+      // 同番号的多个频道视频是同一媒体条目的附件，私聊查询按番号聚合。
+      // 未识别番号的旧数据仍按单条媒体独立返回。
+      const groupKeySql = "COALESCE(m.normalized_code, m.id)";
       const listSql = `
-        SELECT DISTINCT ${PUBLIC_MEDIA_COLUMNS}
+        SELECT ${PUBLIC_MEDIA_COLUMNS}, COUNT(DISTINCT m.id) AS video_count
         FROM media m
         ${joins.join("\n")}
         ${whereSql}
-        ORDER BY m.updated_at DESC, m.id
+        GROUP BY ${groupKeySql}
+        ORDER BY MAX(m.updated_at) DESC, ${groupKeySql}
         LIMIT ? OFFSET ?
       `;
       const countSql = `
-        SELECT COUNT(DISTINCT m.id) AS total
+        SELECT COUNT(DISTINCT ${groupKeySql}) AS total
         FROM media m
         ${joins.join("\n")}
         ${whereSql}
@@ -230,6 +234,7 @@ export function createSearchService({
         tag_id: tag.tag_id,
         display_name: tag.display_name_snapshot,
       })),
+      video_count: Number(row.video_count ?? 1),
     };
   }
 }

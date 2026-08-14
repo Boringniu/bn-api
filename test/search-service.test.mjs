@@ -88,6 +88,16 @@ test("findMedia queries only approved media with clamped paging", async () => {
   assert.ok(!listSql.includes("source_url"));
 });
 
+test("findMedia groups duplicate videos by normalized code", async () => {
+  const db = new FakeD1();
+  await service.findMedia(db, { filters: { code: "ADN-100" } });
+
+  const [listStatement, countStatement] = db.statements;
+  assert.match(listStatement.sql, /GROUP BY COALESCE\(m\.normalized_code, m\.id\)/);
+  assert.match(listStatement.sql, /COUNT\(DISTINCT m\.id\) AS video_count/);
+  assert.match(countStatement.sql, /COUNT\(DISTINCT COALESCE\(m\.normalized_code, m\.id\)\)/);
+});
+
 test("findMedia joins associations for actor and tag filters", async () => {
   const db = new FakeD1();
   await service.findMedia(db, {
