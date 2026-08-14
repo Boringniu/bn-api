@@ -284,24 +284,31 @@ test("configures webhook to receive channel posts and channel edits", async () =
     fetchImpl: async (url, init) => {
       telegramCalls.push({ url, body: JSON.parse(init.body) });
       const method = url.split("/").at(-1);
-      return {
-        json: async () =>
-          method === "setWebhook"
-            ? { ok: true, result: true }
-            : {
-                ok: true,
-                result: {
-                  url: "https://bn-api.nnmmc326.workers.dev/",
-                  allowed_updates: ["message", "channel_post", "edited_channel_post"],
-                  pending_update_count: 0,
-                },
-              },
+      const resultByMethod = {
+        setWebhook: true,
+        getWebhookInfo: {
+          url: "https://bn-api.nnmmc326.workers.dev/",
+          allowed_updates: ["message", "channel_post", "edited_channel_post"],
+          pending_update_count: 0,
+        },
+        getMe: { id: 8101858846 },
+        getChatMember: {
+          status: "administrator",
+          can_post_messages: true,
+          can_edit_messages: false,
+          can_delete_messages: true,
+        },
       };
+      return { json: async () => ({ ok: true, result: resultByMethod[method] }) };
     },
   });
 
   const result = await service.configureWebhook(
-    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_WEBHOOK_SECRET: "webhook-secret" },
+    {
+      TELEGRAM_BOT_TOKEN: "bot-token",
+      TELEGRAM_WEBHOOK_SECRET: "webhook-secret",
+      TELEGRAM_CHANNEL_ID: "-1004460339207",
+    },
     "https://bn-api.nnmmc326.workers.dev/",
   );
 
@@ -313,7 +320,20 @@ test("configures webhook to receive channel posts and channel edits", async () =
   assert.ok(telegramCalls[0].url.includes("/setWebhook"));
   assert.deepEqual(telegramCalls[1].body, {});
   assert.ok(telegramCalls[1].url.includes("/getWebhookInfo"));
+  assert.deepEqual(telegramCalls[2].body, {});
+  assert.ok(telegramCalls[2].url.includes("/getMe"));
+  assert.deepEqual(telegramCalls[3].body, {
+    chat_id: "-1004460339207",
+    user_id: 8101858846,
+  });
+  assert.ok(telegramCalls[3].url.includes("/getChatMember"));
   assert.deepEqual(result.allowed_updates, ["message", "channel_post", "edited_channel_post"]);
+  assert.deepEqual(result.channel_member, {
+    status: "administrator",
+    can_post_messages: true,
+    can_edit_messages: false,
+    can_delete_messages: true,
+  });
 });
 
 test("refreshPinnedIndex posts once, pins, then edits in place", async () => {

@@ -412,10 +412,25 @@ export function createTelegramService({
         allowed_updates: ["message", "channel_post", "edited_channel_post"],
       });
       const info = await this.callTelegram(env, "getWebhookInfo", {});
+      let channelMember = null;
+      if (env.TELEGRAM_CHANNEL_ID) {
+        const self = await this.callTelegram(env, "getMe", {});
+        const member = await this.callTelegram(env, "getChatMember", {
+          chat_id: env.TELEGRAM_CHANNEL_ID,
+          user_id: self.id,
+        });
+        channelMember = {
+          status: member.status ?? null,
+          can_post_messages: member.can_post_messages ?? false,
+          can_edit_messages: member.can_edit_messages ?? false,
+          can_delete_messages: member.can_delete_messages ?? false,
+        };
+      }
       return {
         url: info.url,
         allowed_updates: info.allowed_updates ?? [],
         pending_update_count: info.pending_update_count ?? 0,
+        channel_member: channelMember,
       };
     },
 

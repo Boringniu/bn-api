@@ -66,7 +66,7 @@ jobs:
             if response=$(curl --fail-with-body --silent --show-error \
               --request POST "$WORKER_URL/v1/telegram/webhook" \
               --header "Authorization: Bearer $INGEST_TOKEN" 2>&1); then
-              echo "$response" | jq '.data | {url, allowed_updates, pending_update_count}'
+              echo "$response" | jq '.data | {url, allowed_updates, pending_update_count, channel_member}'
               exit 0
             fi
             echo "Webhook configuration attempt $attempt/30 is waiting for the deployed Worker route: $response" >&2
