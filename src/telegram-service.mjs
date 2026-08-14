@@ -29,13 +29,10 @@ export function createTelegramService({
   const channelIndex = displayConfig.channel_index;
   const botResult = displayConfig.bot_result;
   const hashtagRules = displayConfig.hashtag_rules;
-  const categoryDisplayNames = new Map(
-    categoryConfig.items.map((item) => [item.category_id, item.display_name]),
-  );
 
   return Object.freeze({
     renderChannelPost(media) {
-      const categoryTags = media.category
+      const categoryTags = channelIndex.show_category && media.category
         ? [hashtag(media.category.display_name, channelIndex.category_prefix)]
         : [];
       const actorTags = media.actors
@@ -248,13 +245,8 @@ export function createTelegramService({
         }
       }
 
-      // The channel owner declares default tags for everything posted here
-      // (usually the category word); parsed hashtags take precedence.
-      const defaultTags = (env.TELEGRAM_CHANNEL_DEFAULT_TAGS ?? "")
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean);
-      const rawTags = [...new Set([...contentTags, ...defaultTags])];
+      // 所有 #话题 都是可选的平级元数据；不再注入频道默认分类。
+      const rawTags = [...new Set(contentTags)];
 
       const payload = {
         source: {
@@ -262,7 +254,7 @@ export function createTelegramService({
           external_id: `${channelId}:${post.message_id}`,
         },
         title: parsed.title,
-        raw_tags: rawTags.length > 0 ? rawTags : ["未分类"],
+        raw_tags: rawTags,
         metadata: {
           tg_file_id: video.file_id,
           tg_message_id: String(post.message_id),
@@ -440,14 +432,7 @@ export function createTelegramService({
         throw new Error("TELEGRAM_CHANNEL_ID is not configured");
       }
 
-      const [categoryRows, actorRows, tagRows] = await db.batch([
-        db.prepare(`
-          SELECT m.category_id, COUNT(*) AS media_count
-          FROM media m
-          JOIN channel_posts c ON c.media_id = m.id
-          WHERE m.status = 'approved' AND m.category_id IS NOT NULL
-          GROUP BY m.category_id
-        `),
+      const [actorRows, tagRows] = await db.batch([
         db.prepare(`
           SELECT DISTINCT a.display_name_snapshot AS display_name
           FROM media_actors a
@@ -468,7 +453,6 @@ export function createTelegramService({
       ]);
 
       const pages = this.renderIndexPages({
-        categories: categoryRows.results ?? [],
         actors: actorRows.results ?? [],
         tags: tagRows.results ?? [],
       });
@@ -546,17 +530,7 @@ export function createTelegramService({
       };
     },
 
-    renderIndexPages({ categories, actors, tags }) {
-      const categoryTags = categories
-        .map((row) => {
-          const display = categoryDisplayNames.get(row.category_id);
-          if (!display) {
-            return null;
-          }
-          const tag = hashtag(display, channelIndex.category_prefix);
-          return tag ? `${tag} (${row.media_count})` : null;
-        })
-        .filter(Boolean);
+    renderIndexPages({ actors, tags }) {
       const actorTags = actors
         .map((row) => hashtag(row.display_name, channelIndex.actor_prefix))
         .filter(Boolean);
@@ -565,7 +539,6 @@ export function createTelegramService({
         .filter(Boolean);
 
       const blocks = [
-        { label: channelIndex.category_label, lines: chunkTags(categoryTags) },
         { label: channelIndex.actors_label, lines: chunkTags(actorTags) },
         { label: channelIndex.tags_label, lines: chunkTags(typeTags) },
       ];
@@ -797,11 +770,7 @@ function buildEditedChannelPayload({
       contentTags.push(tag);
     }
   }
-  const defaultTags = (env.TELEGRAM_CHANNEL_DEFAULT_TAGS ?? "")
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-  const rawTags = [...new Set([...contentTags, ...defaultTags])];
+  const rawTags = [...new Set(contentTags)];
   const payload = {
     ...previousPayload,
     source: {

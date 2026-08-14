@@ -35,16 +35,12 @@ export function createTagNormalizer({
     categories,
     tags,
   });
-  const ignoredMatchers = buildIgnoredMatchers(ignoredConfig);
-  const reviewRules = indexReviewRules(reviewRulesConfig);
   const tagComparator = buildTagComparator(tagDictionaryConfig.rules.sort_by);
 
   return Object.freeze({
     normalize(rawTags) {
       return normalizeTags({
-        ignoredMatchers,
         rawTags,
-        reviewRules,
         tagComparator,
         tagDictionaryConfig,
         valueMatchers,
@@ -55,9 +51,7 @@ export function createTagNormalizer({
 }
 
 function normalizeTags({
-  ignoredMatchers,
   rawTags,
-  reviewRules,
   tagComparator,
   tagDictionaryConfig,
   valueMatchers,
@@ -65,11 +59,7 @@ function normalizeTags({
 }) {
   assertRawTags(rawTags);
 
-  const categoryMatches = new Map();
   const tagMatches = new Map();
-  const ignoredTags = [];
-  let ignoredCategoryDecision = false;
-  const reviews = new Map();
   const decisions = [];
 
   for (const [inputIndex, rawValue] of rawTags.entries()) {
@@ -78,169 +68,60 @@ function normalizeTags({
       throw new TypeError(`rawTags[${inputIndex}] must not be blank`);
     }
 
-    const ignoredMatch = findBestMatch(
-      ignoredMatchers,
-      rawValue,
-      normalizedValue,
-    );
-    if (ignoredMatch) {
-      if (ignoredMatch.target.scope.includes("category")) {
-        ignoredCategoryDecision = true;
-      }
-      ignoredTags.push({
-        input_index: inputIndex,
-        raw_value: rawValue,
-        normalized_value: normalizedValue,
-        ignore_id: ignoredMatch.referenceId,
-        reason: ignoredMatch.reason,
-      });
-      decisions.push(
-        createDecision({
-          displayName: null,
-          inputIndex,
-          normalizedValue,
-          outcome: "ignored",
-          rawValue,
-          referenceId: ignoredMatch.referenceId,
-          reviewType: null,
-          source: "ignored",
-        }),
-      );
-      continue;
-    }
-
     const matches = findTopValueMatches(
       valueMatchers,
       rawValue,
       normalizedValue,
     );
-    if (matches.length === 0) {
-      const review = addReview(reviews, reviewRules, {
-        normalizedValues: [normalizedValue],
-        rawValues: [rawValue],
-        subjectType: "tag",
-        trigger: "tag_not_found_in_dictionary",
+    if (matches.length === 0 || matches.length > 1) {
+      const topic = createFreeformTopic(rawValue, normalizedValue);
+      addEntityMatch(tagMatches, topic, {
+        inputIndex,
+        rawValue,
+        source: "channel_topic",
       });
       decisions.push(
         createDecision({
-          displayName: null,
+          displayName: topic.display_name,
           inputIndex,
           normalizedValue,
-          outcome: "pending_review",
+          outcome: "standard_tag",
           rawValue,
-          referenceId: null,
-          reviewType: review.review_type,
-          source: null,
-        }),
-      );
-      continue;
-    }
-
-    if (
-      matches.length > 1 &&
-      matches.every((match) => match.targetType === "category")
-    ) {
-      const orderedMatches = [...matches].sort(compareCategoryMatches);
-      for (const categoryMatch of orderedMatches) {
-        addEntityMatch(categoryMatches, categoryMatch.target, {
-          inputIndex,
-          rawValue,
-          source: categoryMatch.source,
-        });
-      }
-
-      const selectedMatch = orderedMatches[0];
-      decisions.push(
-        createDecision({
-          displayName: selectedMatch.target.display_name,
-          inputIndex,
-          normalizedValue,
-          outcome: "category_candidate",
-          rawValue,
-          referenceId: selectedMatch.target.category_id,
+          referenceId: topic.tag_id,
           reviewType: null,
-          source: selectedMatch.source,
-        }),
-      );
-      continue;
-    }
-
-    if (matches.length > 1) {
-      const review = addReview(reviews, reviewRules, {
-        normalizedValues: [normalizedValue],
-        rawValues: [rawValue],
-        subjectType: "alias",
-        trigger: "alias_candidate_detected",
-      });
-      decisions.push(
-        createDecision({
-          displayName: null,
-          inputIndex,
-          normalizedValue,
-          outcome: "pending_review",
-          rawValue,
-          referenceId: null,
-          reviewType: review.review_type,
-          source: null,
+          source: "channel_topic",
         }),
       );
       continue;
     }
 
     const match = matches[0];
-    if (match.targetType === "tag") {
-      addEntityMatch(tagMatches, match.target, {
-        inputIndex,
-        rawValue,
-        source: match.source,
-      });
-      decisions.push(
-        createDecision({
-          displayName: match.target.display_name,
-          inputIndex,
-          normalizedValue,
-          outcome: "standard_tag",
-          rawValue,
-          referenceId: match.target.tag_id,
-          reviewType: null,
-          source: match.source,
-        }),
-      );
-      continue;
-    }
-
-    addEntityMatch(categoryMatches, match.target, {
+    const topic =
+      match.targetType === "tag"
+        ? match.target
+        : createTopicFromCategory(match.target);
+    addEntityMatch(tagMatches, topic, {
       inputIndex,
       rawValue,
       source: match.source,
     });
     decisions.push(
       createDecision({
-        displayName: match.target.display_name,
+        displayName: topic.display_name,
         inputIndex,
         normalizedValue,
-        outcome: "category_candidate",
+        outcome: "standard_tag",
         rawValue,
-        referenceId: match.target.category_id,
+        referenceId: topic.tag_id,
         reviewType: null,
         source: match.source,
       }),
     );
   }
 
-  const categoryCandidates = [...categoryMatches.values()]
-    .map(formatCategory)
-    .sort(compareCategories);
-  const selectedCategory = categoryCandidates[0] ?? null;
-
-  if (!selectedCategory && !ignoredCategoryDecision) {
-    addReview(reviews, reviewRules, {
-      normalizedValues: rawTags.map(normalizeValue),
-      rawValues: rawTags,
-      subjectType: "category",
-      trigger: "category_not_resolved",
-    });
-  }
+  // 分类体系已停用：保留字段仅为兼容既有数据与接口，未来记录始终为空。
+  const categoryCandidates = [];
+  const selectedCategory = null;
 
   const standardTags = [...tagMatches.values()]
     .map(formatTag)
@@ -265,8 +146,8 @@ function normalizeTags({
     category_candidates: categoryCandidates,
     standard_tags: standardTags,
     display_tags: displayTags,
-    ignored_tags: ignoredTags,
-    reviews: [...reviews.values()],
+    ignored_tags: [],
+    reviews: [],
     decisions,
     violations,
   };
@@ -480,21 +361,43 @@ function formatTag({
   };
 }
 
-function formatCategory({
-  entity,
-  matchedInputIndexes,
-  matchedRawValues,
-  matchSources,
-}) {
+function createTopicFromCategory(category) {
+  const normalized = normalizeValue(category.display_name);
+  const fingerprint = topicFingerprint(normalized);
   return {
-    category_id: entity.category_id,
-    display_name: entity.display_name,
-    slug: entity.slug,
-    priority: entity.priority,
-    matched_raw_values: matchedRawValues,
-    matched_input_indexes: matchedInputIndexes,
-    match_sources: matchSources,
+    tag_id: `tag_topic_${fingerprint}`,
+    display_name: category.display_name,
+    slug: `topic-${fingerprint}`,
+    category: "other",
+    weight: 50,
+    display_enabled: true,
+    search_enabled: true,
+    normalized_aliases: [normalized],
   };
+}
+
+function createFreeformTopic(rawValue, normalizedValue) {
+  const fingerprint = topicFingerprint(normalizedValue);
+  return {
+    tag_id: `tag_topic_${fingerprint}`,
+    display_name: rawValue.trim(),
+    slug: `topic-${fingerprint}`,
+    category: "other",
+    weight: 0,
+    display_enabled: true,
+    search_enabled: true,
+    normalized_aliases: [normalizedValue],
+  };
+}
+
+function topicFingerprint(value) {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  for (const byte of new TextEncoder().encode(value)) {
+    hash ^= BigInt(byte);
+    hash = BigInt.asUintN(64, hash * prime);
+  }
+  return hash.toString(16).padStart(16, "0");
 }
 
 function addReview(
@@ -621,9 +524,6 @@ function assertConfig(config, name) {
 function assertRawTags(rawTags) {
   if (!Array.isArray(rawTags)) {
     throw new TypeError("rawTags must be an array");
-  }
-  if (rawTags.length === 0) {
-    throw new TypeError("rawTags must contain at least one tag");
   }
   for (const [index, value] of rawTags.entries()) {
     if (typeof value !== "string") {

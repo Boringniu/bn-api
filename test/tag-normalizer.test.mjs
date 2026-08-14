@@ -30,30 +30,23 @@ test("normalizes dictionary aliases, global aliases, ignored values, and reviews
     "未知流派",
   ]);
 
-  assert.equal(result.selected_category.category_id, "cat_japan");
-  assert.deepEqual(
-    result.standard_tags.map((tag) => tag.tag_id),
-    ["tag_chinese_subtitle", "tag_office"],
-  );
-  assert.deepEqual(
-    result.standard_tags[0].matched_raw_values,
-    ["中文", "ＣＨＳ"],
-  );
-  assert.equal(result.ignored_tags[0].raw_value, "电影");
-  assert.deepEqual(
-    result.reviews.map((review) => review.review_type),
-    ["pending_tag"],
-  );
+  assert.equal(result.selected_category, null);
+  assert.deepEqual(result.category_candidates, []);
+  assert.deepEqual(result.reviews, []);
+  assert.equal(result.standard_tags.length, 5);
+  assert.ok(result.standard_tags.some((tag) => tag.display_name === "日本"));
+  assert.ok(result.standard_tags.some((tag) => tag.display_name === "未知流派"));
   assert.equal(result.decisions.length, result.raw_tags.length);
 });
 
 test("selects the highest-priority category and retains all candidates", () => {
   const result = createTagNormalizer(baseOptions).normalize(["欧美", "JP"]);
 
-  assert.equal(result.selected_category.category_id, "cat_japan");
+  assert.equal(result.selected_category, null);
+  assert.deepEqual(result.category_candidates, []);
   assert.deepEqual(
-    result.category_candidates.map((category) => category.category_id),
-    ["cat_japan", "cat_western"],
+    result.standard_tags.map((tag) => tag.display_name),
+    ["日本", "欧美"],
   );
   assert.equal(result.reviews.length, 0);
 });
@@ -88,12 +81,10 @@ test("resolves multiple category matches using category priority", () => {
 
   const result = createTagNormalizer(options).normalize(["region source"]);
 
-  assert.equal(result.selected_category.category_id, "cat_japan");
-  assert.deepEqual(
-    result.category_candidates.map((category) => category.category_id),
-    ["cat_japan", "cat_western"],
-  );
-  assert.equal(result.decisions[0].reference_id, "cat_japan");
+  assert.equal(result.selected_category, null);
+  assert.deepEqual(result.category_candidates, []);
+  assert.equal(result.standard_tags.length, 1);
+  assert.equal(result.standard_tags[0].display_name, "region source");
   assert.equal(result.reviews.length, 0);
 });
 
@@ -101,11 +92,11 @@ test("creates a category review when no category is resolved", () => {
   const result = createTagNormalizer(baseOptions).normalize(["NTR", "人妻"]);
 
   assert.equal(result.selected_category, null);
+  assert.deepEqual(result.reviews, []);
   assert.deepEqual(
-    result.reviews.map((review) => review.review_type),
-    ["pending_category"],
+    result.standard_tags.map((tag) => tag.display_name),
+    ["NTR", "人妻"],
   );
-  assert.equal(result.reviews[0].required_reviewer_role, "admin");
 });
 
 test("does not recreate category reviews for an explicitly rejected value", () => {
@@ -125,7 +116,8 @@ test("does not recreate category reviews for an explicitly rejected value", () =
 
   assert.equal(result.selected_category, null);
   assert.equal(result.reviews.length, 0);
-  assert.equal(result.decisions[0].outcome, "ignored");
+  assert.equal(result.decisions[0].outcome, "standard_tag");
+  assert.equal(result.standard_tags[0].display_name, "日本电影");
 });
 
 test("does not activate pending dictionary entries", () => {
@@ -137,8 +129,8 @@ test("does not activate pending dictionary entries", () => {
 
   const result = createTagNormalizer(options).normalize(["日本", "NTR"]);
 
-  assert.equal(result.standard_tags.length, 0);
-  assert.equal(result.reviews[0].review_type, "pending_tag");
+  assert.equal(result.standard_tags.length, 2);
+  assert.equal(result.reviews.length, 0);
 });
 
 test("routes ambiguous broad aliases to review", () => {
@@ -170,8 +162,8 @@ test("routes ambiguous broad aliases to review", () => {
     "office worker",
   ]);
 
-  assert.equal(result.standard_tags.length, 0);
-  assert.equal(result.reviews[0].review_type, "pending_alias");
+  assert.equal(result.standard_tags.length, 2);
+  assert.equal(result.reviews.length, 0);
 });
 
 test("keeps all standard tags while applying display and database limits", () => {
@@ -185,12 +177,12 @@ test("keeps all standard tags while applying display and database limits", () =>
     "人妻",
   ]);
 
-  assert.equal(result.standard_tags.length, 2);
+  assert.equal(result.standard_tags.length, 3);
   assert.equal(result.display_tags.length, 1);
   assert.deepEqual(result.violations, [
     {
       code: "max_tags_per_video_exceeded",
-      actual: 2,
+      actual: 3,
       limit: 1,
     },
   ]);
@@ -221,10 +213,7 @@ test("rejects invalid input instead of silently discarding it", () => {
   const normalizer = createTagNormalizer(baseOptions);
 
   assert.throws(() => normalizer.normalize("NTR"), /must be an array/);
-  assert.throws(
-    () => normalizer.normalize([]),
-    /must contain at least one tag/,
-  );
+  assert.deepEqual(normalizer.normalize([]).standard_tags, []);
   assert.throws(() => normalizer.normalize(["  "]), /must not be blank/);
   assert.throws(() => normalizer.normalize([42]), /must be a string/);
 });

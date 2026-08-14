@@ -56,15 +56,12 @@
         "show_raw_title",
         "show_raw_tags",
         "show_internal_id",
-        "category_label",
         "actors_label",
         "tags_label",
-        "category_prefix",
         "actor_prefix",
         "tag_prefix",
         "max_actors",
         "max_tags",
-        "hide_empty_category_block",
         "hide_empty_actor_block",
         "hide_empty_tag_block",
         "actor_sort",
@@ -79,7 +76,7 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "show_category": {
-          "const": true
+          "type": "boolean"
         },
         "show_actors": {
           "const": true
@@ -114,17 +111,11 @@
         "show_internal_id": {
           "const": false
         },
-        "category_label": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
         "actors_label": {
           "$ref": "#/$defs/nonEmptyString"
         },
         "tags_label": {
           "$ref": "#/$defs/nonEmptyString"
-        },
-        "category_prefix": {
-          "const": "#"
         },
         "actor_prefix": {
           "const": "#"
@@ -141,9 +132,6 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 8
-        },
-        "hide_empty_category_block": {
-          "type": "boolean"
         },
         "hide_empty_actor_block": {
           "type": "boolean"
@@ -166,9 +154,6 @@
         "template": {
           "type": "string",
           "allOf": [
-            {
-              "pattern": "\\{\\{category_tags\\}\\}"
-            },
             {
               "pattern": "\\{\\{actor_tags\\}\\}"
             },

@@ -72,12 +72,12 @@ test("parseChannelTitle handles the observed caption formats", () => {
   }
 });
 
-test("renders the channel template with only category, actors, and tags", () => {
+test("renders the channel template with actors and unified topics only", () => {
   const text = createService().renderChannelPost(sampleMedia);
 
   assert.equal(
     text,
-    "🎬影视库索引\n\n📂分类\n#日本\n\n👤演员\n#希岛爱理\n\n🏷类型\n#人妻 #剧情 #中文字幕",
+    "🎬影视库索引\n\n👤演员\n#希岛爱理\n\n🏷话题\n#人妻 #剧情 #中文字幕",
   );
   assert.ok(!text.includes("ABP-123"), "code must not appear in channel");
   assert.ok(!text.includes("raw title"), "raw title must not appear");
@@ -106,8 +106,8 @@ test("hides empty actor and tag blocks per config", () => {
     tags: [],
   });
   assert.ok(!text.includes("👤演员"));
-  assert.ok(!text.includes("🏷类型"));
-  assert.ok(text.includes("📂分类"));
+  assert.ok(!text.includes("🏷话题"));
+  assert.ok(!text.includes("📂分类"));
 });
 
 test("caps channel actors and tags at configured maximums", () => {
@@ -347,7 +347,6 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
 
   const freshDb = new FakeD1({
     batchResults: [
-      [{ category_id: "cat_japan", media_count: 23 }],
       [{ display_name: "希岛爱理" }, { display_name: "波多野结衣" }],
       [{ display_name: "人妻", weight: 90 }],
     ],
@@ -359,7 +358,7 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   assert.deepEqual(pinned.message_ids, [55]);
   assert.ok(telegramCalls.some((c) => c.url.includes("/pinChatMessage")));
   const sendCall = telegramCalls.find((c) => c.url.includes("/sendMessage"));
-  assert.ok(sendCall.body.text.includes("#日本 (23)"));
+  assert.ok(!sendCall.body.text.includes("📂分类"));
   assert.ok(sendCall.body.text.includes("#希岛爱理"));
   assert.ok(sendCall.body.text.includes("#人妻"));
   assert.ok(
@@ -368,7 +367,7 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
 
   telegramCalls.length = 0;
   const editDb = new FakeD1({
-    batchResults: [[], [], []],
+    batchResults: [[], []],
     firstResults: [{ value: "[55]" }],
   });
   const edited = await service.refreshPinnedIndex(editDb, env);
@@ -392,7 +391,6 @@ test("index paginates into multiple messages when tags overflow", async () => {
   }));
   const db = new FakeD1({
     batchResults: [
-      [{ category_id: "cat_japan", media_count: 700 }],
       manyActors,
       [{ display_name: "人妻", weight: 90 }],
     ],
@@ -514,7 +512,6 @@ test("private channel forwarded video is catalogued without reposting or deletin
     {
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_CHANNEL_ID: "-1004460339207",
-      TELEGRAM_CHANNEL_DEFAULT_TAGS: "日本",
     },
   );
 
@@ -532,7 +529,6 @@ test("private channel forwarded video is catalogued without reposting or deletin
   );
   assert.ok(ingestCalls[0].raw_tags.includes("中文字幕"));
   assert.ok(ingestCalls[0].raw_tags.includes("人妻"));
-  assert.ok(ingestCalls[0].raw_tags.includes("日本"), "default tag applied");
   assert.deepEqual(ingestCalls[0].actors, ["希島あいり", "波多野結衣"]);
   assert.equal(ingestCalls[0].metadata.tg_file_id, "VIDFILE");
   assert.equal(ingestCalls[0].metadata.tg_message_id, "99");
@@ -604,7 +600,6 @@ test("editing an indexed channel video synchronizes catalog metadata without rep
     {
       TELEGRAM_BOT_TOKEN: "bot-token",
       TELEGRAM_CHANNEL_ID: "-1004460339207",
-      TELEGRAM_CHANNEL_DEFAULT_TAGS: "日本",
     },
   );
 
@@ -615,7 +610,6 @@ test("editing an indexed channel video synchronizes catalog metadata without rep
   assert.deepEqual(ingestCalls[0].actors, ["希島あいり"]);
   assert.ok(ingestCalls[0].raw_tags.includes("中文字幕"));
   assert.ok(ingestCalls[0].raw_tags.includes("人妻"));
-  assert.ok(ingestCalls[0].raw_tags.includes("日本"));
   assert.equal(ingestCalls[0].description, "更新后的两行说明\n排版保留");
   assert.ok(
     !telegramCalls.some((call) =>
@@ -678,7 +672,7 @@ test("direct private-channel media without a forward origin is catalogued", asyn
     ingestService: {
       async ingest(_db, payload) {
         ingestCalls.push(payload);
-        return { id: "media_direct", status: "pending" };
+        return { id: "media_direct", status: "approved" };
       },
     },
     searchConfig: configs.get("search").data,
@@ -692,16 +686,16 @@ test("direct private-channel media without a forward origin is catalogued", asyn
       channel_post: {
         chat: { id: -1004460339207 },
         message_id: 124,
-        caption: "ADN-001 #人妻",
+        caption: "ADN-001",
         video: { file_id: "LOCAL", file_name: "ADN-001.mp4" },
       },
     },
     { TELEGRAM_CHANNEL_ID: "-1004460339207" },
   );
 
-  assert.deepEqual(result, { ingested: "media_direct", status: "pending" });
+  assert.deepEqual(result, { ingested: "media_direct", status: "approved" });
   assert.equal(ingestCalls[0].code, "ADN-001");
-  assert.ok(ingestCalls[0].raw_tags.includes("人妻"));
+  assert.deepEqual(ingestCalls[0].raw_tags, []);
 });
 
 test("channel posts from other chats and non-videos are ignored", async () => {

@@ -41,19 +41,19 @@ test("writes normalized media facts and associations in one D1 batch", async () 
 
   assert.equal(result.outcome, "created");
   assert.equal(result.status, "approved");
-  assert.equal(result.category.category_id, "cat_japan");
+  assert.equal(result.category, null);
   assert.deepEqual(
     result.actors.map((actor) => actor.actor_id),
     ["actor_000001"],
   );
-  assert.deepEqual(
-    result.tags.map((tag) => tag.tag_id),
-    ["tag_chinese_subtitle", "tag_ntr"],
-  );
+  assert.equal(result.tags.length, 3);
+  assert.ok(result.tags.some((tag) => tag.tag_id === "tag_chinese_subtitle"));
+  assert.ok(result.tags.some((tag) => tag.tag_id === "tag_ntr"));
+  assert.ok(result.tags.some((tag) => tag.display_name === "日本"));
   assert.equal(db.batches.length, 1);
   assert.ok(findStatement(db, "INSERT INTO media ("));
   assert.ok(findStatement(db, "INSERT INTO media_actors"));
-  assert.equal(findStatements(db, "INSERT INTO media_tags").length, 2);
+  assert.equal(findStatements(db, "INSERT INTO media_tags").length, 3);
   assert.equal(findStatements(db, "INSERT INTO review_items").length, 0);
 });
 
@@ -73,9 +73,9 @@ test("writes unknown values and invalid codes to review without changing rules",
   assert.equal(result.status, "pending");
   assert.deepEqual(
     new Set(result.reviews.map((review) => review.review_type)),
-    new Set(["pending_tag", "pending_category", "pending_actor", "possible_code"]),
+    new Set(["pending_actor", "possible_code"]),
   );
-  assert.equal(findStatements(db, "INSERT INTO review_items").length, 4);
+  assert.equal(findStatements(db, "INSERT INTO review_items").length, 2);
 });
 
 test("uses a stable media id and reports idempotent updates", async () => {
