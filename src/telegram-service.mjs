@@ -896,22 +896,47 @@ export function createTelegramService({
 
   async function resolveDirectorySearch(db, query, page) {
     const rawTag = parseRawTagQuery(query);
-    const { resolution: configuredResolution } = searchService.resolveQuery(query);
-    const resolution = rawTag
-      ? { type: "raw_tag", raw_tag: rawTag, display_name: rawTag }
-      : configuredResolution;
-    const isDirectoryQuery = ["code", "code_prefix", "actor", "tag", "raw_tag"].includes(
+    if (rawTag) {
+      const resolution = { type: "raw_tag", raw_tag: rawTag, display_name: rawTag };
+      return {
+        resolution,
+        result: await findDirectoryMedia(db, resolution, page),
+      };
+    }
+
+    // 频道不再区分“演员标签”和“话题标签”。因此普通人名输入先按
+    // 已收录的原生标签精确匹配；只有没有这条原生标签时，才回退到旧演员词典。
+    // 这避免了“本庄铃”被模糊词典错误改判为“本乡爱”。
+    const plainRawTag = parsePlainRawTagQuery(query);
+    if (plainRawTag) {
+      const resolution = {
+        type: "raw_tag",
+        raw_tag: plainRawTag,
+        display_name: plainRawTag,
+      };
+      const result = await findDirectoryMedia(db, resolution, page);
+      if (result.total > 0) {
+        return { resolution, result };
+      }
+    }
+
+    const { resolution } = searchService.resolveQuery(query);
+    const isDirectoryQuery = ["code", "code_prefix", "actor", "tag"].includes(
       resolution?.type,
     );
     const result = isDirectoryQuery
-      ? await searchService.findMedia(db, {
-          filters: resolutionFilters(resolution),
-          page,
-          pageSize: botResult.page_size,
-          includeChannelLinks: true,
-        })
+      ? await findDirectoryMedia(db, resolution, page)
       : { page, page_size: botResult.page_size, total: 0, results: [] };
     return { resolution, result };
+  }
+
+  async function findDirectoryMedia(db, resolution, page) {
+    return searchService.findMedia(db, {
+      filters: resolutionFilters(resolution),
+      page,
+      pageSize: botResult.page_size,
+      includeChannelLinks: true,
+    });
   }
 
   function renderSearchReply({ query, resolution, searchResult }) {
@@ -999,6 +1024,14 @@ function parseRawTagQuery(query) {
   }
   const tag = raw.replace(/^#+/u, "").trim();
   return tag && !/\s/u.test(tag) ? tag : null;
+}
+
+function parsePlainRawTagQuery(query) {
+  const raw = typeof query === "string" ? query.trim() : "";
+  if (!raw || raw.startsWith("#") || /\s/u.test(raw)) {
+    return null;
+  }
+  return raw;
 }
 
 function channelMessageUrl(chatId, messageId) {

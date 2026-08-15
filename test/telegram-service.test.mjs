@@ -301,8 +301,9 @@ test("private bot accepts actress-directory searches", async () => {
     { TELEGRAM_BOT_TOKEN: "bot-token" },
   );
 
-  assert.equal(searchService.findCalls.length, 1);
-  assert.deepEqual(searchService.findCalls[0].filters, { actor_id: "actor_000001" });
+  assert.equal(searchService.findCalls.length, 2);
+  assert.deepEqual(searchService.findCalls[0].filters, { raw_tag: "希岛爱理" });
+  assert.deepEqual(searchService.findCalls[1].filters, { actor_id: "actor_000001" });
   assert.equal(telegramCalls.length, 1);
   assert.ok(telegramCalls[0].body.text.includes("#ABP-123"));
   assert.equal(telegramCalls[0].body.parse_mode, "HTML");
@@ -311,8 +312,9 @@ test("private bot accepts actress-directory searches", async () => {
 
 test("private bot searches any native hashtag and returns a fully linked resource entry", async () => {
   const telegramCalls = [];
+  const nativeMedia = { ...sampleMedia, raw_tags: ["希岛爱理", "剧情", "人妻"] };
   const searchService = createSearchStub({
-    media: [{ ...sampleMedia, raw_tags: ["希岛爱理", "剧情", "人妻"] }],
+    rawTagMedia: [nativeMedia],
   });
   const service = createService({
     searchService,
@@ -340,6 +342,54 @@ test("private bot searches any native hashtag and returns a fully linked resourc
     assert.ok(resultText.includes(`>${label}</a>`), label);
   }
   assert.equal((resultText.match(/https:\/\/t\.me\/c\/4396154285\/88/gu) ?? []).length, 4);
+});
+
+test("plain native name takes precedence over a conflicting actor dictionary match", async () => {
+  const telegramCalls = [];
+  const nativeMedia = {
+    ...sampleMedia,
+    code: "JUC-048",
+    raw_tags: ["爱弓凉", "不伦", "合集1"],
+  };
+  const searchService = createSearchStub({
+    resolution: {
+      type: "actor",
+      actor_id: "actor_wrong_match",
+      display_name: "本乡爱",
+    },
+    media: [{ ...sampleMedia, code: "STARS-676" }],
+    rawTagMedia: [nativeMedia],
+  });
+  const service = createService({
+    searchService,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+
+  await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        text: "爱弓凉",
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  assert.deepEqual(searchService.findCalls, [
+    {
+      filters: { raw_tag: "爱弓凉" },
+      page: 1,
+      pageSize: 10,
+      includeChannelLinks: true,
+    },
+  ]);
+  assert.ok(telegramCalls[0].body.text.includes("#JUC-048"));
+  assert.ok(!telegramCalls[0].body.text.includes("#STARS-676"));
 });
 
 test("index command links to the first pinned channel index message", async () => {
@@ -1402,7 +1452,7 @@ test("preserves an actor-name hashtag as a topic and actress association", async
   assert.deepEqual(ingestCalls[0].actors, ["松下纱荣子"]);
 });
 
-function createSearchStub({ resolution = null, media = [] } = {}) {
+function createSearchStub({ resolution = null, media = [], rawTagMedia = [] } = {}) {
   return {
     findCalls: [],
     resolveQuery(query) {
@@ -1410,7 +1460,8 @@ function createSearchStub({ resolution = null, media = [] } = {}) {
     },
     async findMedia(db, options) {
       this.findCalls.push(options);
-      return { page: 1, page_size: 10, total: media.length, results: media };
+      const results = Object.hasOwn(options.filters, "raw_tag") ? rawTagMedia : media;
+      return { page: 1, page_size: 10, total: results.length, results };
     },
     async getMedia() {
       return media[0] ?? null;
