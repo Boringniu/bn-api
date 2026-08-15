@@ -58,13 +58,59 @@ export function createTelegramService({
       return text.replace(/\n{3,}/gu, "\n\n").trim();
     },
 
-    renderBotResults({ results }) {
+    renderBotResults({ results, page = 1, page_size = results.length || 1 }) {
       if (results.length === 0) {
         return "没有找到匹配的内容。";
       }
+      const offset = (page - 1) * page_size;
       return results
-        .map((media, index) => renderDirectoryEntry(media, index + 1))
+        .map((media, index) => renderDirectoryEntry(media, offset + index + 1))
         .join("\n");
+    },
+
+    async handleSearchNavigation(db, callback, env) {
+      const chatId = callback?.message?.chat?.id;
+      if (!chatId || callback?.message?.chat?.type !== "private") {
+        return { ignored: "non_private_callback" };
+      }
+      const navigation = decodeSearchNavigation(callback.data);
+      if (!navigation) {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "导航已失效，请重新搜索。",
+        });
+        return { ignored: "invalid_search_navigation" };
+      }
+
+      const search = await resolveDirectorySearch(db, navigation.query, navigation.page);
+      const reply = renderSearchReply({
+        query: navigation.query,
+        resolution: search.resolution,
+        searchResult: search.result,
+      });
+      const replyMarkup = buildSearchNavigationMarkup(
+        navigation.query,
+        search.result,
+      );
+
+      await this.callTelegram(env, "answerCallbackQuery", {
+        callback_query_id: callback.id,
+      });
+      try {
+        await this.callTelegram(env, "editMessageText", {
+          chat_id: chatId,
+          message_id: callback.message.message_id,
+          text: reply,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        });
+      } catch (error) {
+        if (!String(error.message).includes("message is not modified")) {
+          throw error;
+        }
+      }
+      return { chat_id: chatId, replied: true, page: navigation.page };
     },
 
     async handleUpdate(db, update, env) {
@@ -73,6 +119,9 @@ export function createTelegramService({
       }
       if (update?.edited_channel_post) {
         return this.handleEditedChannelPost(db, update.edited_channel_post, env);
+      }
+      if (update?.callback_query) {
+        return this.handleSearchNavigation(db, update.callback_query, env);
       }
       const message = update?.message;
       const text = message?.text?.trim();
@@ -85,14 +134,12 @@ export function createTelegramService({
       const isUserAdmin = isAdmin(userId, env);
 
       let reply;
+      let replyMarkup = null;
       if (text === "/start" || text === "/help") {
         reply =
-          "📚 命令列表\n\n" +
-          "🔍 番号查询\n" +
-          "直接发送番号即可查询\n" +
-          "示例：ABP-123\n\n" +
-          "🔧 管理（Admin Only）\n" +
-          "/refresh - 刷新频道置顶索引";
+          "直接输入番号前缀或女优名即可查询。\n" +
+          "例如：ADN、白雪\n\n" +
+          "/refresh - 刷新频道索引（管理员）";
       } else if (text === "/refresh") {
         if (!isUserAdmin) {
           reply = "权限不足";
@@ -107,29 +154,21 @@ export function createTelegramService({
         }
       } else {
         const query = text.replace(/^\/search\s+/u, "");
-        const { resolution } = searchService.resolveQuery(query);
-        const isDirectoryQuery = ["code", "code_prefix", "actor"].includes(
-          resolution?.type,
-        );
-        const searchResult = isDirectoryQuery
-          ? await searchService.findMedia(db, {
-              filters: resolutionFilters(resolution),
-              page: 1,
-              pageSize: botResult.page_size,
-              includeChannelLinks: true,
-            })
-          : { page: 1, page_size: botResult.page_size, total: 0, results: [] };
+        const search = await resolveDirectorySearch(db, query, 1);
 
         await logSearch(db, {
           userId,
           query,
-          resolution,
-          resultCount: searchResult.total,
+          resolution: search.resolution,
+          resultCount: search.result.total,
         });
 
-        reply = isDirectoryQuery
-          ? this.renderBotResults({ query, ...searchResult })
-          : "请输入番号前缀（如 ADN）或女优名。";
+        reply = renderSearchReply({
+          query,
+          resolution: search.resolution,
+          searchResult: search.result,
+        });
+        replyMarkup = buildSearchNavigationMarkup(query, search.result);
       }
 
       await this.callTelegram(env, "sendMessage", {
@@ -137,6 +176,7 @@ export function createTelegramService({
         text: reply,
         parse_mode: "HTML",
         disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       });
       return { chat_id: chatId, replied: true };
     },
@@ -415,7 +455,12 @@ export function createTelegramService({
       await this.callTelegram(env, "setWebhook", {
         url: webhookUrl,
         secret_token: env.TELEGRAM_WEBHOOK_SECRET,
-        allowed_updates: ["message", "channel_post", "edited_channel_post"],
+        allowed_updates: [
+          "message",
+          "callback_query",
+          "channel_post",
+          "edited_channel_post",
+        ],
       });
       const info = await this.callTelegram(env, "getWebhookInfo", {});
       let channelMember = null;
@@ -603,6 +648,82 @@ export function createTelegramService({
       return body.result;
     },
   });
+
+  async function resolveDirectorySearch(db, query, page) {
+    const { resolution } = searchService.resolveQuery(query);
+    const isDirectoryQuery = ["code", "code_prefix", "actor"].includes(
+      resolution?.type,
+    );
+    const result = isDirectoryQuery
+      ? await searchService.findMedia(db, {
+          filters: resolutionFilters(resolution),
+          page,
+          pageSize: botResult.page_size,
+          includeChannelLinks: true,
+        })
+      : { page, page_size: botResult.page_size, total: 0, results: [] };
+    return { resolution, result };
+  }
+
+  function renderSearchReply({ query, resolution, searchResult }) {
+    if (!["code", "code_prefix", "actor"].includes(resolution?.type)) {
+      return `未识别“${escapeHtml(query)}”。请输入番号前缀（如 ADN）或女优名。`;
+    }
+    if (searchResult.total === 0) {
+      const subject =
+        resolution.type === "actor"
+          ? `#${resolution.display_name}`
+          : `#${resolution.code ?? resolution.prefix ?? query}`;
+      return `暂未收录 ${escapeHtml(subject)}。`;
+    }
+    const offset = (searchResult.page - 1) * searchResult.page_size;
+    return searchResult.results
+      .map((media, index) => renderDirectoryEntry(media, offset + index + 1))
+      .join("\n");
+  }
+
+  function buildSearchNavigationMarkup(query, searchResult) {
+    const totalPages = Math.ceil(searchResult.total / searchResult.page_size);
+    if (totalPages <= 1) {
+      return null;
+    }
+    const buttons = [];
+    if (searchResult.page > 1) {
+      const data = encodeSearchNavigation(query, searchResult.page - 1);
+      if (data) {
+        buttons.push({ text: "‹ 上一页", callback_data: data });
+      }
+    }
+    if (searchResult.page < totalPages) {
+      const data = encodeSearchNavigation(query, searchResult.page + 1);
+      if (data) {
+        buttons.push({ text: "下一页 ›", callback_data: data });
+      }
+    }
+    return buttons.length > 0 ? { inline_keyboard: [buttons] } : null;
+  }
+
+  function encodeSearchNavigation(query, page) {
+    const data = `search:${page}:${encodeURIComponent(query)}`;
+    return data.length <= 64 ? data : null;
+  }
+
+  function decodeSearchNavigation(data) {
+    if (typeof data !== "string") {
+      return null;
+    }
+    const match = /^search:(\d{1,4}):(.+)$/u.exec(data);
+    if (!match) {
+      return null;
+    }
+    try {
+      const query = decodeURIComponent(match[2]);
+      const page = Number(match[1]);
+      return query && Number.isInteger(page) && page > 0 ? { query, page } : null;
+    } catch {
+      return null;
+    }
+  }
 
   function renderDirectoryEntry(media, index) {
   const code = media.code ? `#${media.code}` : "#未知编号";

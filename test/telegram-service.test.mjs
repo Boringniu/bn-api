@@ -275,6 +275,97 @@ test("private bot accepts actress-directory searches", async () => {
   assert.equal(telegramCalls[0].body.disable_web_page_preview, true);
 });
 
+test("private bot gives a specific message for recognized but uncollected searches", async () => {
+  const telegramCalls = [];
+  const searchService = createSearchStub({
+    resolution: { type: "code_prefix", match: "prefix", prefix: "ADN" },
+    media: [],
+  });
+  const service = createService({
+    searchService,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+
+  await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        text: "ADN",
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  assert.equal(telegramCalls[0].body.text, "暂未收录 #ADN。");
+});
+
+test("private bot adds next-page navigation and edits the result on callback", async () => {
+  const calls = [];
+  const searchService = {
+    resolveQuery(query) {
+      return {
+        query,
+        resolution: { type: "code_prefix", match: "prefix", prefix: "ADN" },
+      };
+    },
+    async findMedia(_db, { page }) {
+      return {
+        page,
+        page_size: 10,
+        total: 12,
+        results: page === 1 ? [sampleMedia] : [{ ...sampleMedia, code: "ADN-200" }],
+      };
+    },
+  };
+  const service = createService({
+    searchService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+  const db = new FakeD1();
+
+  await service.handleUpdate(
+    db,
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        text: "ADN",
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+  assert.equal(calls[0].method, "sendMessage");
+  assert.deepEqual(calls[0].body.reply_markup, {
+    inline_keyboard: [[{ text: "下一页 ›", callback_data: "search:2:ADN" }]],
+  });
+
+  await service.handleUpdate(
+    db,
+    {
+      callback_query: {
+        id: "callback-1",
+        data: "search:2:ADN",
+        message: { message_id: 88, chat: { id: 111, type: "private" } },
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+  assert.equal(calls[1].method, "answerCallbackQuery");
+  assert.equal(calls[2].method, "editMessageText");
+  assert.ok(calls[2].body.text.startsWith("11 •"));
+  assert.deepEqual(calls[2].body.reply_markup, {
+    inline_keyboard: [[{ text: "‹ 上一页", callback_data: "search:1:ADN" }]],
+  });
+});
+
 test("private media is never accepted as a submission", async () => {
   const telegramCalls = [];
   const service = createTelegramService({
@@ -348,7 +439,12 @@ test("configures webhook to receive channel posts and channel edits", async () =
         setWebhook: true,
         getWebhookInfo: {
           url: "https://bn-api.nnmmc326.workers.dev/",
-          allowed_updates: ["message", "channel_post", "edited_channel_post"],
+          allowed_updates: [
+            "message",
+            "callback_query",
+            "channel_post",
+            "edited_channel_post",
+          ],
           pending_update_count: 0,
         },
         getMe: { id: 8101858846 },
@@ -375,7 +471,12 @@ test("configures webhook to receive channel posts and channel edits", async () =
   assert.deepEqual(telegramCalls[0].body, {
     url: "https://bn-api.nnmmc326.workers.dev/",
     secret_token: "webhook-secret",
-    allowed_updates: ["message", "channel_post", "edited_channel_post"],
+    allowed_updates: [
+      "message",
+      "callback_query",
+      "channel_post",
+      "edited_channel_post",
+    ],
   });
   assert.ok(telegramCalls[0].url.includes("/setWebhook"));
   assert.deepEqual(telegramCalls[1].body, {});
@@ -387,7 +488,12 @@ test("configures webhook to receive channel posts and channel edits", async () =
     user_id: 8101858846,
   });
   assert.ok(telegramCalls[3].url.includes("/getChatMember"));
-  assert.deepEqual(result.allowed_updates, ["message", "channel_post", "edited_channel_post"]);
+  assert.deepEqual(result.allowed_updates, [
+    "message",
+    "callback_query",
+    "channel_post",
+    "edited_channel_post",
+  ]);
   assert.deepEqual(result.channel_member, {
     status: "administrator",
     can_post_messages: true,

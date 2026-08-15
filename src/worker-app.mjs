@@ -100,6 +100,7 @@ export function createWorkerApp({
             updateId: update?.update_id ?? null,
             path: url.pathname,
             hasMessage: Boolean(update?.message),
+            hasCallbackQuery: Boolean(update?.callback_query),
             hasChannelPost: Boolean(update?.channel_post),
             hasEditedChannelPost: Boolean(update?.edited_channel_post),
           });
@@ -418,7 +419,9 @@ async function recordTelegramUpdateAudit(db, update, outcome, result = null) {
     return;
   }
   const post = update.channel_post ?? update.edited_channel_post ?? update.message;
-  const updateType = update.edited_channel_post
+  const updateType = update.callback_query
+    ? "callback_query"
+    : update.edited_channel_post
     ? "edited_channel_post"
     : update.channel_post
       ? "channel_post"
@@ -432,6 +435,7 @@ async function recordTelegramUpdateAudit(db, update, outcome, result = null) {
     caption_hashtag_count: countHashtags(post?.caption ?? post?.text),
     has_media_group: Boolean(post?.media_group_id),
     is_forwarded: Boolean(post?.forward_origin ?? post?.forward_from),
+    has_callback_query: Boolean(update?.callback_query),
     handled: Boolean(result),
     ingested: Boolean(result?.ingested),
     synchronized: Boolean(result?.synchronized),
