@@ -5,7 +5,7 @@
   "items": [],
   "channel_index": {
     "enabled": true,
-    "title": "🎬影视库索引",
+    "title": "影视库索引",
     "show_category": false,
     "show_actors": true,
     "show_tags": true,
@@ -34,7 +34,7 @@
       "weight_desc",
       "display_name_asc"
     ],
-    "template": "🎬影视库索引\n\n👤演员\n{{actor_tags}}\n\n🏷话题\n{{type_tags}}"
+    "template": "影视库索引\n\n👤演员\n{{actor_tags}}\n\n🏷话题\n{{type_tags}}"
   },
   "bot_result": {
     "show_category": false,

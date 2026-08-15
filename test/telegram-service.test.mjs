@@ -79,7 +79,7 @@ test("renders the channel template with actors and unified topics only", () => {
 
   assert.equal(
     text,
-    "🎬影视库索引\n\n👤演员\n#希岛爱理\n\n🏷话题\n#人妻 #剧情 #中文字幕",
+    "影视库索引\n\n👤演员\n#希岛爱理\n\n🏷话题\n#人妻 #剧情 #中文字幕",
   );
   assert.ok(!text.includes("ABP-123"), "code must not appear in channel");
   assert.ok(!text.includes("raw title"), "raw title must not appear");
@@ -659,71 +659,51 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   const service = createService({ fetchImpl });
   const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-100" };
 
-  const freshDb = new FakeD1({
-    batchResults: [[{ display_name: "人妻", weight: 90 }]],
-    firstResults: [null, null],
-  });
+  const freshDb = new FakeD1({ firstResults: [null] });
   const pinned = await service.refreshPinnedIndex(freshDb, env);
   assert.equal(pinned.outcome, "pinned");
   assert.equal(pinned.pages, 1);
   assert.deepEqual(pinned.message_ids, [55]);
   assert.ok(telegramCalls.some((c) => c.url.includes("/pinChatMessage")));
   const sendCall = telegramCalls.find((c) => c.url.includes("/sendMessage"));
-  assert.ok(!sendCall.body.text.includes("📂分类"));
+  assert.equal(sendCall.body.text, "影视库索引");
   assert.ok(!sendCall.body.text.includes("👤演员"));
-  assert.ok(!sendCall.body.text.includes("#希岛爱理"));
-  assert.ok(sendCall.body.text.includes("#人妻"));
-  assert.ok(
-    freshDb.statements.some((s) => s.sql.includes("json_each(m.raw_payload_json, '$.raw_tags')")),
-  );
+  assert.ok(!sendCall.body.text.includes("🏷话题"));
+  assert.ok(!sendCall.body.text.includes("#"));
   assert.ok(
     freshDb.statements.some((s) => s.sql.includes("INSERT INTO database_metadata")),
   );
 
   telegramCalls.length = 0;
-  const editDb = new FakeD1({
-    batchResults: [[]],
-    firstResults: [{ value: "[55]" }],
-  });
+  const editDb = new FakeD1({ firstResults: [{ value: "[55]" }] });
   const edited = await service.refreshPinnedIndex(editDb, env);
   assert.equal(edited.outcome, "edited");
   assert.ok(telegramCalls[0].url.includes("/editMessageText"));
   assert.equal(telegramCalls[0].body.message_id, 55);
 });
 
-test("index paginates into multiple messages when tags overflow", async () => {
+test("title-only index always remains a single pinned message", async () => {
   const telegramCalls = [];
   const service = createService({
     fetchImpl: async (url, init) => {
       telegramCalls.push({ url, body: JSON.parse(init.body) });
-      return {
-        json: async () => ({ ok: true, result: { message_id: 100 + telegramCalls.length } }),
-      };
+      return { json: async () => ({ ok: true, result: { message_id: 101 } }) };
     },
   });
-  const manyTopics = Array.from({ length: 700 }, (_, i) => ({
-    display_name: `原生话题第${String(i).padStart(4, "0")}号`,
-  }));
-  const db = new FakeD1({
-    batchResults: [manyTopics],
-    firstResults: [null, null],
-  });
+  const db = new FakeD1({ firstResults: [null] });
 
   const result = await service.refreshPinnedIndex(db, {
     TELEGRAM_BOT_TOKEN: "bot-token",
     TELEGRAM_CHANNEL_ID: "-100",
   });
 
-  assert.ok(result.pages > 1, `expected multiple pages, got ${result.pages}`);
-  assert.equal(result.message_ids.length, result.pages);
-  const sends = telegramCalls.filter((c) => c.url.includes("/sendMessage"));
-  assert.equal(sends.length, result.pages);
-  for (const send of sends) {
-    assert.ok(send.body.text.length <= 4096);
-  }
-  const pins = telegramCalls.filter((c) => c.url.includes("/pinChatMessage"));
-  assert.equal(pins.length, 1, "only the first page is pinned");
-  assert.ok(sends[1].body.text.includes("（续）"));
+  assert.equal(result.pages, 1);
+  assert.deepEqual(result.message_ids, [101]);
+  const sends = telegramCalls.filter((call) => call.url.includes("/sendMessage"));
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].body.text, "影视库索引");
+  const pins = telegramCalls.filter((call) => call.url.includes("/pinChatMessage"));
+  assert.equal(pins.length, 1);
 });
 
 test("approved channel video refreshes the index automatically", async () => {

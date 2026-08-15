@@ -365,6 +365,54 @@ test("accepts authenticated Telegram webhooks on the root path", async () => {
   assert.equal(telegramService.updates.length, 1);
 });
 
+test("defers authenticated Telegram webhook processing through the execution context", async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const telegramService = {
+    updates: [],
+    async handleUpdate(_db, update) {
+      await gate;
+      this.updates.push(update);
+    },
+  };
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService,
+    versionConfig,
+  });
+  let background = null;
+  const executionCtx = {
+    waitUntil(promise) {
+      background = promise;
+    },
+  };
+
+  const response = await app.fetch(
+    new Request("https://api.example.com/", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": "webhook-secret",
+      },
+      body: JSON.stringify({ update_id: 2 }),
+    }),
+    { DB: {}, TELEGRAM_WEBHOOK_SECRET: "webhook-secret" },
+    executionCtx,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(telegramService.updates.length, 0);
+  assert.ok(background);
+  release();
+  await background;
+  assert.equal(telegramService.updates.length, 1);
+});
+
 test("audits Telegram channel updates without persisting caption content", async () => {
   const db = new AuditD1();
   const telegramService = {

@@ -377,18 +377,17 @@ export function createTelegramService({
       const pending = await appendPendingForwardGroup(db, groupKey, post);
       await delay(mediaGroupSettleMs);
 
-      const latest = await readPendingForwardGroup(db, groupKey);
-      if (!latest || latest.status === "processed") {
-        return { buffered: true, media_group_id: post.media_group_id };
-      }
-      const posts = sortChannelPosts(latest.posts);
+      const posts = sortChannelPosts(await readPendingForwardGroup(db, groupKey));
       const lastMessageId = posts.at(-1)?.message_id;
       if (Number(post.message_id) !== lastMessageId) {
         return {
           buffered: true,
           media_group_id: post.media_group_id,
-          collected: pending.posts.length,
+          collected: pending.length,
         };
+      }
+      if (!(await claimPendingForwardGroup(db, groupKey))) {
+        return { buffered: true, media_group_id: post.media_group_id };
       }
 
       const copiedMessageIds = await this.stripForwardMediaGroup(
@@ -397,7 +396,7 @@ export function createTelegramService({
         env,
       );
 
-      await writePendingForwardGroup(db, groupKey, { status: "processed", posts });
+      await writePendingForwardGroupState(db, groupKey, "processed");
       const outcomes = [];
       for (const [index, source] of posts.entries()) {
         const copiedPost = copiedChannelPost(source, copiedMessageIds[index]);
@@ -614,22 +613,7 @@ export function createTelegramService({
         throw new Error("TELEGRAM_CHANNEL_ID is not configured");
       }
 
-      const [tagRows] = await db.batch([
-        db.prepare(`
-          SELECT DISTINCT topic.value AS display_name
-          FROM media m
-          JOIN channel_posts c ON c.media_id = m.id
-          JOIN json_each(m.raw_payload_json, '$.raw_tags') AS topic
-          WHERE m.status = 'approved'
-            AND typeof(topic.value) = 'text'
-            AND trim(topic.value) <> ''
-          ORDER BY display_name
-        `),
-      ]);
-
-      const pages = this.renderIndexPages({
-        tags: tagRows.results ?? [],
-      });
+      const pages = this.renderIndexPages();
 
       const stored = await readIndexMessageIds(db);
       const messageIds = [];
@@ -704,40 +688,8 @@ export function createTelegramService({
       };
     },
 
-    renderIndexPages({ tags }) {
-      const typeTags = tags
-        .map((row) => hashtag(row.display_name, channelIndex.tag_prefix))
-        .filter(Boolean);
-
-      const blocks = channelIndex.show_tags
-        ? [{ label: channelIndex.tags_label, lines: chunkTags(typeTags) }]
-        : [];
-
-      const pages = [];
-      let current = channelIndex.title;
-      const pushPage = () => {
-        pages.push(current.trim());
-        current = `${channelIndex.title}（续）`;
-      };
-
-      for (const block of blocks) {
-        let blockHeader = `\n\n${block.label}`;
-        if (current.length + blockHeader.length > PAGE_CHAR_LIMIT) {
-          pushPage();
-        }
-        current += blockHeader;
-        let continued = false;
-        for (const line of block.lines) {
-          if (current.length + line.length + 1 > PAGE_CHAR_LIMIT) {
-            pushPage();
-            current += `\n\n${block.label}（续）`;
-            continued = true;
-          }
-          current += `\n${line}`;
-        }
-      }
-      pushPage();
-      return pages;
+    renderIndexPages() {
+      return [channelIndex.title];
     },
 
     async callTelegram(env, method, payload) {
@@ -1001,6 +953,14 @@ function pendingForwardGroupKey(channelId, mediaGroupId) {
   return `${PENDING_FORWARD_GROUP_PREFIX}${channelId}:${mediaGroupId}`;
 }
 
+function pendingForwardMessageKey(groupKey, messageId) {
+  return `${groupKey}:message:${messageId}`;
+}
+
+function pendingForwardGroupStateKey(groupKey) {
+  return `${groupKey}:state`;
+}
+
 function snapshotChannelPost(post) {
   return {
     chat: post.chat,
@@ -1035,25 +995,21 @@ function delay(milliseconds) {
 }
 
 async function readPendingForwardGroup(db, key) {
-  const row = await db
-    .prepare("SELECT value FROM database_metadata WHERE key = ?")
-    .bind(key)
-    .first();
-  if (!row?.value) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(row.value);
-    if (!Array.isArray(parsed?.posts)) {
-      return null;
+  const result = await db
+    .prepare("SELECT value FROM database_metadata WHERE key LIKE ? ORDER BY key")
+    .bind(`${key}:message:%`)
+    .all();
+  return (result.results ?? []).flatMap((row) => {
+    try {
+      const post = JSON.parse(row.value);
+      return Number.isInteger(Number(post?.message_id)) ? [post] : [];
+    } catch {
+      return [];
     }
-    return parsed;
-  } catch {
-    return null;
-  }
+  });
 }
 
-async function writePendingForwardGroup(db, key, group) {
+async function writePendingForwardGroupState(db, key, status) {
   await db
     .prepare(
       `INSERT INTO database_metadata (key, value, updated_at)
@@ -1062,22 +1018,37 @@ async function writePendingForwardGroup(db, key, group) {
          value = excluded.value,
          updated_at = excluded.updated_at`,
     )
-    .bind(key, JSON.stringify(group), new Date().toISOString())
+    .bind(pendingForwardGroupStateKey(key), status, new Date().toISOString())
     .run();
 }
 
+async function claimPendingForwardGroup(db, key) {
+  const result = await db
+    .prepare(
+      `INSERT INTO database_metadata (key, value, updated_at)
+       VALUES (?, 'processing', ?)
+       ON CONFLICT (key) DO NOTHING`,
+    )
+    .bind(pendingForwardGroupStateKey(key), new Date().toISOString())
+    .run();
+  const changes = result?.meta?.changes ?? result?.changes;
+  return changes == null ? true : changes > 0;
+}
+
 async function appendPendingForwardGroup(db, key, post) {
-  const existing = await readPendingForwardGroup(db, key);
-  if (existing?.status === "processed") {
-    return existing;
-  }
-  const posts = existing?.posts ?? [];
-  if (!posts.some((entry) => Number(entry.message_id) === Number(post.message_id))) {
-    posts.push(snapshotChannelPost(post));
-  }
-  const group = { status: "pending", posts: sortChannelPosts(posts) };
-  await writePendingForwardGroup(db, key, group);
-  return group;
+  await db
+    .prepare(
+      `INSERT INTO database_metadata (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT (key) DO NOTHING`,
+    )
+    .bind(
+      pendingForwardMessageKey(key, post.message_id),
+      JSON.stringify(snapshotChannelPost(post)),
+      new Date().toISOString(),
+    )
+    .run();
+  return readPendingForwardGroup(db, key);
 }
 
 async function storePendingChannelContext(db, post, channelId) {

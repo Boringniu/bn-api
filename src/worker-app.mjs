@@ -11,7 +11,7 @@ export function createWorkerApp({
   versionConfig,
 }) {
   return Object.freeze({
-    async fetch(request, env) {
+    async fetch(request, env, executionCtx = null) {
       const requestId =
         request.headers.get("x-request-id") ?? crypto.randomUUID();
 
@@ -104,27 +104,35 @@ export function createWorkerApp({
             hasChannelPost: Boolean(update?.channel_post),
             hasEditedChannelPost: Boolean(update?.edited_channel_post),
           });
-          // Always ack to Telegram: a thrown error would make it retry the
-          // same update forever and block every later update in the queue.
+          // Record receipt before acknowledging. Media-group work deliberately
+          // continues in the background so Telegram can deliver every member of
+          // the group while the service is collecting it for one batch copy.
           await recordTelegramUpdateAudit(env.DB, update, "received");
-          try {
-            const result = await telegramService.handleUpdate(env.DB, update, env);
-            await recordTelegramUpdateAudit(env.DB, update, "handled", result);
-            console.log("telegram webhook handled", {
-              requestId,
-              updateId: update?.update_id ?? null,
-              replied: Boolean(result?.replied),
-              handled: Boolean(result),
-            });
-          } catch (error) {
-            await recordTelegramUpdateAudit(env.DB, update, "failed", {
-              error: error?.message ?? "unknown error",
-            });
-            console.error("telegram update failed", {
-              message: error?.message,
-              requestId,
-              updateId: update?.update_id,
-            });
+          const processUpdate = async () => {
+            try {
+              const result = await telegramService.handleUpdate(env.DB, update, env);
+              await recordTelegramUpdateAudit(env.DB, update, "handled", result);
+              console.log("telegram webhook handled", {
+                requestId,
+                updateId: update?.update_id ?? null,
+                replied: Boolean(result?.replied),
+                handled: Boolean(result),
+              });
+            } catch (error) {
+              await recordTelegramUpdateAudit(env.DB, update, "failed", {
+                error: error?.message ?? "unknown error",
+              });
+              console.error("telegram update failed", {
+                message: error?.message,
+                requestId,
+                updateId: update?.update_id,
+              });
+            }
+          };
+          if (typeof executionCtx?.waitUntil === "function") {
+            executionCtx.waitUntil(processUpdate());
+          } else {
+            await processUpdate();
           }
           return jsonResponse({ ok: true }, 200, requestId);
         }

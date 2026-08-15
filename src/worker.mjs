@@ -74,7 +74,7 @@ const app = createWorkerApp({
 });
 
 export default {
-  fetch(request, env) {
-    return app.fetch(request, env);
+  fetch(request, env, executionCtx) {
+    return app.fetch(request, env, executionCtx);
   },
 };
