@@ -168,6 +168,41 @@ test("strips forwarded source by copying before deleting the original", async ()
   assert.equal(calls[1].payload.message_id, 77);
 });
 
+test("strips a forwarded media group in one copy to preserve album layout", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      calls.push({ method, payload: JSON.parse(init.body) });
+      const result = method === "copyMessages"
+        ? [{ message_id: 90 }, { message_id: 91 }]
+        : true;
+      return { json: async () => ({ ok: true, result }) };
+    },
+  });
+
+  const copied = await service.stripForwardMediaGroup(
+    [{ message_id: 70 }, { message_id: 71 }],
+    "-1004396154285",
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  assert.deepEqual(copied, [90, 91]);
+  assert.deepEqual(calls.map((call) => call.method), [
+    "copyMessages",
+    "deleteMessage",
+    "deleteMessage",
+  ]);
+  assert.deepEqual(calls[0].payload, {
+    chat_id: "-1004396154285",
+    from_chat_id: "-1004396154285",
+    message_ids: [70, 71],
+  });
+  assert.ok(!Object.hasOwn(calls[0].payload, "caption"));
+  assert.equal(calls[1].payload.message_id, 70);
+  assert.equal(calls[2].payload.message_id, 71);
+});
+
 test("rolls back the copy when deleting the forwarded original fails", async () => {
   const calls = [];
   const service = createService({
@@ -625,10 +660,7 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-100" };
 
   const freshDb = new FakeD1({
-    batchResults: [
-      [{ display_name: "希岛爱理" }, { display_name: "波多野结衣" }],
-      [{ display_name: "人妻", weight: 90 }],
-    ],
+    batchResults: [[{ display_name: "人妻", weight: 90 }]],
     firstResults: [null, null],
   });
   const pinned = await service.refreshPinnedIndex(freshDb, env);
@@ -638,15 +670,19 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   assert.ok(telegramCalls.some((c) => c.url.includes("/pinChatMessage")));
   const sendCall = telegramCalls.find((c) => c.url.includes("/sendMessage"));
   assert.ok(!sendCall.body.text.includes("📂分类"));
-  assert.ok(sendCall.body.text.includes("#希岛爱理"));
+  assert.ok(!sendCall.body.text.includes("👤演员"));
+  assert.ok(!sendCall.body.text.includes("#希岛爱理"));
   assert.ok(sendCall.body.text.includes("#人妻"));
+  assert.ok(
+    freshDb.statements.some((s) => s.sql.includes("json_each(m.raw_payload_json, '$.raw_tags')")),
+  );
   assert.ok(
     freshDb.statements.some((s) => s.sql.includes("INSERT INTO database_metadata")),
   );
 
   telegramCalls.length = 0;
   const editDb = new FakeD1({
-    batchResults: [[], []],
+    batchResults: [[]],
     firstResults: [{ value: "[55]" }],
   });
   const edited = await service.refreshPinnedIndex(editDb, env);
@@ -665,14 +701,11 @@ test("index paginates into multiple messages when tags overflow", async () => {
       };
     },
   });
-  const manyActors = Array.from({ length: 700 }, (_, i) => ({
-    display_name: `虚构演员名字第${String(i).padStart(4, "0")}号`,
+  const manyTopics = Array.from({ length: 700 }, (_, i) => ({
+    display_name: `原生话题第${String(i).padStart(4, "0")}号`,
   }));
   const db = new FakeD1({
-    batchResults: [
-      manyActors,
-      [{ display_name: "人妻", weight: 90 }],
-    ],
+    batchResults: [manyTopics],
     firstResults: [null, null],
   });
 
@@ -1032,6 +1065,46 @@ test("inherits hashtags from a preceding channel context message", async () => {
   );
 
   assert.equal(ingestCalls[0].code, "ADN-100");
+  assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
+});
+
+test("inherits a preceding code when the video file name has no code", async () => {
+  const ingestCalls = [];
+  const context = {
+    message_id: 600,
+    code: "ADN-106",
+    raw_tags: ["松下纱荣子"],
+  };
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_context_code", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+  });
+  const db = new FakeD1({
+    firstResults: [null, { value: JSON.stringify(context) }, null, null],
+  });
+
+  await service.handleUpdate(
+    db,
+    {
+      channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 601,
+        video: { file_id: "CONTEXT-NO-CODE", file_name: "clip.mp4" },
+      },
+    },
+    { TELEGRAM_CHANNEL_ID: "-1004460339207" },
+  );
+
+  assert.equal(ingestCalls[0].code, "ADN-106");
   assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
 });
 

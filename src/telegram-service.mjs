@@ -6,6 +6,8 @@ const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
+const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
+const DEFAULT_MEDIA_GROUP_SETTLE_MS = 2_000;
 
 export function createTelegramService({
   categoryConfig,
@@ -15,6 +17,7 @@ export function createTelegramService({
   searchService,
   versionConfig,
   fetchImpl = fetch,
+  mediaGroupSettleMs = DEFAULT_MEDIA_GROUP_SETTLE_MS,
 }) {
   for (const [name, value] of Object.entries({
     categoryConfig,
@@ -31,6 +34,9 @@ export function createTelegramService({
   const channelIndex = displayConfig.channel_index;
   const botResult = displayConfig.bot_result;
   const hashtagRules = displayConfig.hashtag_rules;
+  if (!Number.isInteger(mediaGroupSettleMs) || mediaGroupSettleMs < 0) {
+    throw new TypeError("mediaGroupSettleMs must be a non-negative integer");
+  }
 
   return Object.freeze({
     renderChannelPost(media) {
@@ -194,10 +200,13 @@ export function createTelegramService({
 
     // 私人频道只由管理员维护：原生发布直接入库；经授权的转发则复制为
     // 无来源副本并删除原转发，再对副本建立索引。
-    async handleChannelPost(db, post, env) {
+    async handleChannelPost(db, post, env, { skipIndexRefresh = false } = {}) {
       const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
       if (String(post.chat?.id ?? "") !== channelId) {
         return null;
+      }
+      if (shouldStripForwardSource(post, env) && post.media_group_id) {
+        return this.bufferForwardedMediaGroup(db, post, channelId, env);
       }
       const stripped = await this.stripForwardSource(post, channelId, env);
       if (stripped) {
@@ -344,7 +353,7 @@ export function createTelegramService({
         )
         .run();
 
-      if (result.status === "approved") {
+      if (result.status === "approved" && !skipIndexRefresh) {
         // 审核通过后只刷新置顶索引；刷新失败不能影响本次入库。
         try {
           await this.refreshPinnedIndex(db, env);
@@ -361,6 +370,102 @@ export function createTelegramService({
         outcome.copied_message_id = stripped.message_id;
       }
       return outcome;
+    },
+
+    async bufferForwardedMediaGroup(db, post, channelId, env) {
+      const groupKey = pendingForwardGroupKey(channelId, post.media_group_id);
+      const pending = await appendPendingForwardGroup(db, groupKey, post);
+      await delay(mediaGroupSettleMs);
+
+      const latest = await readPendingForwardGroup(db, groupKey);
+      if (!latest || latest.status === "processed") {
+        return { buffered: true, media_group_id: post.media_group_id };
+      }
+      const posts = sortChannelPosts(latest.posts);
+      const lastMessageId = posts.at(-1)?.message_id;
+      if (Number(post.message_id) !== lastMessageId) {
+        return {
+          buffered: true,
+          media_group_id: post.media_group_id,
+          collected: pending.posts.length,
+        };
+      }
+
+      const copiedMessageIds = await this.stripForwardMediaGroup(
+        posts,
+        channelId,
+        env,
+      );
+
+      await writePendingForwardGroup(db, groupKey, { status: "processed", posts });
+      const outcomes = [];
+      for (const [index, source] of posts.entries()) {
+        const copiedPost = copiedChannelPost(source, copiedMessageIds[index]);
+        // 相册的 caption 只会出现在其中一条消息上。复制后先保存它，
+        // 让同组后续视频也能继承人工填写的番号与原生话题。
+        await storePendingChannelContext(db, copiedPost, channelId);
+        outcomes.push(
+          await this.handleChannelPost(
+            db,
+            copiedPost,
+            env,
+            { skipIndexRefresh: true },
+          ),
+        );
+      }
+      if (outcomes.some((outcome) => outcome?.status === "approved")) {
+        try {
+          await this.refreshPinnedIndex(db, env);
+        } catch (error) {
+          console.warn("pinned index refresh failed after media group copy", {
+            message: error.message,
+          });
+        }
+      }
+      return {
+        source_stripped: true,
+        media_group_id: post.media_group_id,
+        copied_message_ids: copiedMessageIds,
+        processed: outcomes.filter(Boolean).length,
+      };
+    },
+
+    async stripForwardMediaGroup(posts, channelId, env) {
+      if (!Array.isArray(posts) || posts.length === 0) {
+        throw new TypeError("posts must contain at least one media-group message");
+      }
+      const copied = await this.callTelegram(env, "copyMessages", {
+        chat_id: channelId,
+        from_chat_id: channelId,
+        message_ids: posts.map((post) => post.message_id),
+      });
+      const copiedMessageIds = Array.isArray(copied)
+        ? copied.map((entry) => Number(entry?.message_id)).filter(Number.isInteger)
+        : [];
+      if (copiedMessageIds.length !== posts.length) {
+        throw new Error("copyMessages returned an incomplete media group");
+      }
+      try {
+        for (const source of posts) {
+          await this.callTelegram(env, "deleteMessage", {
+            chat_id: channelId,
+            message_id: source.message_id,
+          });
+        }
+      } catch (error) {
+        for (const messageId of copiedMessageIds) {
+          try {
+            await this.callTelegram(env, "deleteMessage", {
+              chat_id: channelId,
+              message_id: messageId,
+            });
+          } catch {
+            // Keep the original Telegram error; cleanup is best-effort only.
+          }
+        }
+        throw error;
+      }
+      return copiedMessageIds;
     },
 
     async stripForwardSource(post, channelId, env) {
@@ -509,28 +614,20 @@ export function createTelegramService({
         throw new Error("TELEGRAM_CHANNEL_ID is not configured");
       }
 
-      const [actorRows, tagRows] = await db.batch([
+      const [tagRows] = await db.batch([
         db.prepare(`
-          SELECT DISTINCT a.display_name_snapshot AS display_name
-          FROM media_actors a
-          JOIN channel_posts c ON c.media_id = a.media_id
-          JOIN media m ON m.id = a.media_id
-          WHERE m.status = 'approved' AND a.display_enabled = 1
-          ORDER BY a.display_name_snapshot
-        `),
-        db.prepare(`
-          SELECT a.display_name_snapshot AS display_name, MAX(a.weight) AS weight
-          FROM media_tags a
-          JOIN channel_posts c ON c.media_id = a.media_id
-          JOIN media m ON m.id = a.media_id
-          WHERE m.status = 'approved' AND a.display_enabled = 1
-          GROUP BY a.display_name_snapshot
-          ORDER BY weight DESC, a.display_name_snapshot
+          SELECT DISTINCT topic.value AS display_name
+          FROM media m
+          JOIN channel_posts c ON c.media_id = m.id
+          JOIN json_each(m.raw_payload_json, '$.raw_tags') AS topic
+          WHERE m.status = 'approved'
+            AND typeof(topic.value) = 'text'
+            AND trim(topic.value) <> ''
+          ORDER BY display_name
         `),
       ]);
 
       const pages = this.renderIndexPages({
-        actors: actorRows.results ?? [],
         tags: tagRows.results ?? [],
       });
 
@@ -607,18 +704,14 @@ export function createTelegramService({
       };
     },
 
-    renderIndexPages({ actors, tags }) {
-      const actorTags = actors
-        .map((row) => hashtag(row.display_name, channelIndex.actor_prefix))
-        .filter(Boolean);
+    renderIndexPages({ tags }) {
       const typeTags = tags
         .map((row) => hashtag(row.display_name, channelIndex.tag_prefix))
         .filter(Boolean);
 
-      const blocks = [
-        { label: channelIndex.actors_label, lines: chunkTags(actorTags) },
-        { label: channelIndex.tags_label, lines: chunkTags(typeTags) },
-      ];
+      const blocks = channelIndex.show_tags
+        ? [{ label: channelIndex.tags_label, lines: chunkTags(typeTags) }]
+        : [];
 
       const pages = [];
       let current = channelIndex.title;
@@ -904,6 +997,89 @@ function pendingChannelContextKey(channelId) {
   return `${PENDING_CHANNEL_CONTEXT_PREFIX}${channelId}`;
 }
 
+function pendingForwardGroupKey(channelId, mediaGroupId) {
+  return `${PENDING_FORWARD_GROUP_PREFIX}${channelId}:${mediaGroupId}`;
+}
+
+function snapshotChannelPost(post) {
+  return {
+    chat: post.chat,
+    message_id: post.message_id,
+    media_group_id: post.media_group_id,
+    caption: post.caption,
+    text: post.text,
+    video: post.video,
+    document: post.document,
+    animation: post.animation,
+    video_note: post.video_note,
+    forward_origin: post.forward_origin,
+    forward_from: post.forward_from,
+  };
+}
+
+function copiedChannelPost(source, messageId) {
+  return {
+    ...source,
+    message_id: messageId,
+    forward_origin: null,
+    forward_from: null,
+  };
+}
+
+function sortChannelPosts(posts) {
+  return [...posts].sort((left, right) => Number(left.message_id) - Number(right.message_id));
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function readPendingForwardGroup(db, key) {
+  const row = await db
+    .prepare("SELECT value FROM database_metadata WHERE key = ?")
+    .bind(key)
+    .first();
+  if (!row?.value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(row.value);
+    if (!Array.isArray(parsed?.posts)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writePendingForwardGroup(db, key, group) {
+  await db
+    .prepare(
+      `INSERT INTO database_metadata (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT (key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(key, JSON.stringify(group), new Date().toISOString())
+    .run();
+}
+
+async function appendPendingForwardGroup(db, key, post) {
+  const existing = await readPendingForwardGroup(db, key);
+  if (existing?.status === "processed") {
+    return existing;
+  }
+  const posts = existing?.posts ?? [];
+  if (!posts.some((entry) => Number(entry.message_id) === Number(post.message_id))) {
+    posts.push(snapshotChannelPost(post));
+  }
+  const group = { status: "pending", posts: sortChannelPosts(posts) };
+  await writePendingForwardGroup(db, key, group);
+  return group;
+}
+
 async function storePendingChannelContext(db, post, channelId) {
   const rawText = readPostText(post);
   if (!rawText) {
@@ -952,7 +1128,7 @@ async function readPendingChannelContext(db, channelId, messageId, code) {
       Number.isInteger(messageDistance) &&
       messageDistance > 0 &&
       messageDistance <= PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW;
-    const codeMatches = Boolean(code && context.code && code === context.code);
+    const codeMatches = Boolean(context.code && (!code || code === context.code));
     if (!isNear || !codeMatches || !Array.isArray(context.raw_tags)) {
       return null;
     }
