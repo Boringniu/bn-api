@@ -7,7 +7,7 @@ const TAGS_PER_LINE = 5;
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
-const PENDING_PRIVATE_FORWARD_CONTEXT_PREFIX = "private_forward_context:";
+const PENDING_PRIVATE_FORWARD_GROUP_PREFIX = "private_forward_group:";
 const DEFAULT_MEDIA_GROUP_SETTLE_MS = 2_000;
 
 export function createTelegramService({
@@ -39,7 +39,7 @@ export function createTelegramService({
     throw new TypeError("mediaGroupSettleMs must be a non-negative integer");
   }
 
-  return Object.freeze({
+  const service = Object.freeze({
     renderChannelPost(media) {
       const categoryTags = channelIndex.show_category && media.category
         ? [hashtag(media.category.display_name, channelIndex.category_prefix)]
@@ -207,131 +207,69 @@ export function createTelegramService({
     },
 
     // 管理员将旧频道历史资源逐条转发到 Bot 私聊时，只建立指向旧频道
-    // 原消息的搜索映射。成功后删除的仅是私聊副本，频道原消息绝不改动。
+    // 原消息的搜索映射。相册先聚合同组消息，再只建一条索引并删除全部私聊副本。
+    // 频道原消息绝不改动。
     async ingestLegacyPrivateForward(db, message, env, isUserAdmin) {
       if (!isUserAdmin) {
         return { ignored: "private_forward_not_admin" };
       }
-      const origin = legacyForwardOrigin(message, env);
-      const media = resolveTelegramMedia(message);
-      if (!origin || !ingestService) {
+      if (!legacyForwardOrigin(message, env) || !ingestService) {
         return { ignored: "private_forward_invalid" };
       }
-      const contextKey = privateForwardContextKey(message.chat.id, message.media_group_id);
-      if (!media) {
-        const caption = readPostText(message);
-        if (!caption || !contextKey) {
-          return { ignored: "private_forward_without_media" };
-        }
-        await writePrivateForwardContext(db, contextKey, {
-          caption,
-          message_ids: [message.message_id],
-        });
-        return { buffered: true, private_message_id: message.message_id };
+      if (message.media_group_id) {
+        return this.bufferLegacyPrivateForwardGroup(db, message, env);
       }
-
-      const privateContext = contextKey
-        ? await readPrivateForwardContext(db, contextKey)
-        : null;
-      const rawText = readPostText(message) || privateContext?.caption || "";
-      const fileName = (media.file_name ?? "").replace(
-        /\.(mp4|mkv|avi|wmv|ts)$/iu,
-        "",
-      );
-      const parsed = parseChannelTitle(
-        rawText || fileName || `视频 ${origin.messageId}`,
-      );
-      const rawTags = parsed.raw_tags.map(cleanTopicValue).filter(Boolean);
-      const payload = {
-        source: {
-          provider: "channel",
-          external_id: `${origin.channelId}:${origin.messageId}`,
-        },
-        title: parsed.title,
-        raw_tags: rawTags,
-        metadata: {
-          tg_file_id: media.file_id,
-          tg_message_id: String(origin.messageId),
-        },
-      };
-      if (parsed.description) {
-        payload.description = parsed.description;
-      }
-      if (parsed.code) {
-        payload.code = parsed.code;
-      }
-
-      const result = await ingestService.ingest(db, payload);
-      const timestamp = new Date().toISOString();
-      await db
-        .prepare(
-          `INSERT INTO channel_posts (
-             media_id, tg_chat_id, tg_message_id, template_version,
-             posted_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (media_id) DO UPDATE SET
-             tg_chat_id = excluded.tg_chat_id,
-             tg_message_id = excluded.tg_message_id,
-             updated_at = excluded.updated_at`,
-        )
-        .bind(
-          result.id,
-          origin.channelId,
-          origin.messageId,
-          versionConfig.release.version,
-          timestamp,
-          timestamp,
-        )
-        .run();
-      await db
-        .prepare(
-          `INSERT INTO media_files (
-             media_id, tg_file_id, tg_file_unique_id, source_chat_id,
-             source_message_id, imported_from, created_at
-           ) VALUES (?, ?, ?, ?, ?, 'private_forward', ?)
-           ON CONFLICT (media_id) DO UPDATE SET
-             tg_file_id = excluded.tg_file_id,
-             tg_file_unique_id = excluded.tg_file_unique_id,
-             source_chat_id = excluded.source_chat_id,
-             source_message_id = excluded.source_message_id`,
-        )
-        .bind(
-          result.id,
-          media.file_id,
-          media.file_unique_id ?? null,
-          origin.channelId,
-          String(origin.messageId),
-          timestamp,
-        )
-        .run();
-
-      const privateMessageIds = [
-        ...new Set([...(privateContext?.message_ids ?? []), message.message_id]),
-      ];
-      for (const privateMessageId of privateMessageIds) {
-        await this.callTelegram(env, "deleteMessage", {
-          chat_id: message.chat.id,
-          message_id: privateMessageId,
-        });
-      }
-      if (contextKey) {
-        await deletePrivateForwardContext(db, contextKey);
-      }
-      const exists = result.outcome === "updated";
-      await this.callTelegram(env, "sendMessage", {
-        chat_id: message.chat.id,
-        text: exists
-          ? `ℹ️ 已存在并更新 #${escapeHtml(parsed.code ?? "历史资源")}`
-          : `✅ 已收录 #${escapeHtml(parsed.code ?? "历史资源")}`,
-        parse_mode: "HTML",
+      return ingestLegacyPrivateForwardRecord(db, message, env, {
+        rawText: readPostText(message),
+        privateMessageIds: [message.message_id],
       });
-      return {
-        ingested: result.id,
-        status: result.status,
-        source_channel_message_id: origin.messageId,
-        private_copy_deleted: true,
-        existing: exists,
-      };
+    },
+
+    async bufferLegacyPrivateForwardGroup(db, message, env) {
+      const groupKey = pendingPrivateForwardGroupKey(
+        message.chat.id,
+        message.media_group_id,
+      );
+      const postsAfterAppend = await appendPendingForwardGroup(db, groupKey, message);
+      if (!resolveTelegramMedia(message)) {
+        return {
+          buffered: true,
+          media_group_id: message.media_group_id,
+          collected: postsAfterAppend.length,
+        };
+      }
+      await delay(mediaGroupSettleMs);
+
+      const posts = sortChannelPosts(await readPendingForwardGroup(db, groupKey));
+      const lastMessageId = posts.at(-1)?.message_id;
+      if (Number(message.message_id) !== Number(lastMessageId)) {
+        return {
+          buffered: true,
+          media_group_id: message.media_group_id,
+          collected: posts.length,
+        };
+      }
+      if (!(await claimPendingForwardGroup(db, groupKey))) {
+        return { buffered: true, media_group_id: message.media_group_id };
+      }
+
+      const mediaPost = posts.find((post) => resolveTelegramMedia(post));
+      if (!mediaPost) {
+        return { buffered: true, media_group_id: message.media_group_id };
+      }
+      try {
+        const rawText = posts.map(readPostText).find(Boolean) ?? "";
+        const privateMessageIds = posts.map((post) => post.message_id);
+        const result = await ingestLegacyPrivateForwardRecord(db, mediaPost, env, {
+          rawText,
+          privateMessageIds,
+        });
+        await deletePendingPrivateForwardGroup(db, groupKey);
+        return { ...result, media_group_id: message.media_group_id };
+      } catch (error) {
+        await deletePendingPrivateForwardGroup(db, groupKey);
+        throw error;
+      }
     },
 
     // 私人频道只由管理员维护：原生发布直接入库；经授权的转发则复制为
@@ -848,6 +786,114 @@ export function createTelegramService({
     },
   });
 
+  return service;
+
+  async function ingestLegacyPrivateForwardRecord(
+    db,
+    message,
+    env,
+    { rawText, privateMessageIds },
+  ) {
+    const origin = legacyForwardOrigin(message, env);
+    const media = resolveTelegramMedia(message);
+    if (!origin || !media) {
+      return { ignored: "private_forward_without_media" };
+    }
+    const fileName = (media.file_name ?? "").replace(
+      /\.(mp4|mkv|avi|wmv|ts)$/iu,
+      "",
+    );
+    const parsed = parseChannelTitle(
+      rawText || fileName || `视频 ${origin.messageId}`,
+    );
+    const rawTags = parsed.raw_tags.map(cleanTopicValue).filter(Boolean);
+    const payload = {
+      source: {
+        provider: "channel",
+        external_id: `${origin.channelId}:${origin.messageId}`,
+      },
+      title: parsed.title,
+      raw_tags: rawTags,
+      metadata: {
+        tg_file_id: media.file_id,
+        tg_message_id: String(origin.messageId),
+      },
+    };
+    if (parsed.description) {
+      payload.description = parsed.description;
+    }
+    if (parsed.code) {
+      payload.code = parsed.code;
+    }
+
+    const result = await ingestService.ingest(db, payload);
+    const timestamp = new Date().toISOString();
+    await db
+      .prepare(
+        `INSERT INTO channel_posts (
+           media_id, tg_chat_id, tg_message_id, template_version,
+           posted_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (media_id) DO UPDATE SET
+           tg_chat_id = excluded.tg_chat_id,
+           tg_message_id = excluded.tg_message_id,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        result.id,
+        origin.channelId,
+        origin.messageId,
+        versionConfig.release.version,
+        timestamp,
+        timestamp,
+      )
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO media_files (
+           media_id, tg_file_id, tg_file_unique_id, source_chat_id,
+           source_message_id, imported_from, created_at
+         ) VALUES (?, ?, ?, ?, ?, 'private_forward', ?)
+         ON CONFLICT (media_id) DO UPDATE SET
+           tg_file_id = excluded.tg_file_id,
+           tg_file_unique_id = excluded.tg_file_unique_id,
+           source_chat_id = excluded.source_chat_id,
+           source_message_id = excluded.source_message_id`,
+      )
+      .bind(
+        result.id,
+        media.file_id,
+        media.file_unique_id ?? null,
+        origin.channelId,
+        String(origin.messageId),
+        timestamp,
+      )
+      .run();
+
+    const messageIds = [...new Set(privateMessageIds.map(Number).filter(Number.isInteger))];
+    for (const privateMessageId of messageIds) {
+      await service.callTelegram(env, "deleteMessage", {
+        chat_id: message.chat.id,
+        message_id: privateMessageId,
+      });
+    }
+    const exists = result.outcome === "updated";
+    await service.callTelegram(env, "sendMessage", {
+      chat_id: message.chat.id,
+      text: exists
+        ? `ℹ️ 已存在并更新 #${escapeHtml(parsed.code ?? "历史资源")}`
+        : `✅ 已收录 #${escapeHtml(parsed.code ?? "历史资源")}`,
+      parse_mode: "HTML",
+    });
+    return {
+      ingested: result.id,
+      status: result.status,
+      source_channel_message_id: origin.messageId,
+      private_copy_deleted: true,
+      existing: exists,
+    };
+  }
+
   async function resolveDirectorySearch(db, query, page) {
     const rawTag = parseRawTagQuery(query);
     const { resolution: configuredResolution } = searchService.resolveQuery(query);
@@ -1128,11 +1174,11 @@ function pendingChannelContextKey(channelId) {
   return `${PENDING_CHANNEL_CONTEXT_PREFIX}${channelId}`;
 }
 
-function privateForwardContextKey(chatId, mediaGroupId) {
+function pendingPrivateForwardGroupKey(chatId, mediaGroupId) {
   if (!chatId || !mediaGroupId) {
-    return null;
+    throw new TypeError("private forwarded media group requires chat and group IDs");
   }
-  return `${PENDING_PRIVATE_FORWARD_CONTEXT_PREFIX}${chatId}:${mediaGroupId}`;
+  return `${PENDING_PRIVATE_FORWARD_GROUP_PREFIX}${chatId}:${mediaGroupId}`;
 }
 
 function pendingForwardGroupKey(channelId, mediaGroupId) {
@@ -1180,41 +1226,10 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function readPrivateForwardContext(db, key) {
-  const row = await db
-    .prepare("SELECT value FROM database_metadata WHERE key = ?")
-    .bind(key)
-    .first();
-  if (!row?.value) {
-    return null;
-  }
-  try {
-    const context = JSON.parse(row.value);
-    return typeof context.caption === "string" && Array.isArray(context.message_ids)
-      ? context
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-async function writePrivateForwardContext(db, key, context) {
+async function deletePendingPrivateForwardGroup(db, key) {
   await db
-    .prepare(
-      `INSERT INTO database_metadata (key, value, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT (key) DO UPDATE SET
-         value = excluded.value,
-         updated_at = excluded.updated_at`,
-    )
-    .bind(key, JSON.stringify(context), new Date().toISOString())
-    .run();
-}
-
-async function deletePrivateForwardContext(db, key) {
-  await db
-    .prepare("DELETE FROM database_metadata WHERE key = ?")
-    .bind(key)
+    .prepare("DELETE FROM database_metadata WHERE key = ? OR key LIKE ?")
+    .bind(pendingForwardGroupStateKey(key), `${key}:message:%`)
     .run();
 }
 
