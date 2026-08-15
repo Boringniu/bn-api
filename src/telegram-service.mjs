@@ -1260,16 +1260,22 @@ function delay(milliseconds) {
 }
 
 async function deletePendingPrivateForwardGroup(db, key) {
+  const messagePrefix = `${key}:message:`;
   await db
-    .prepare("DELETE FROM database_metadata WHERE key = ? OR key LIKE ?")
-    .bind(pendingForwardGroupStateKey(key), `${key}:message:%`)
+    .prepare(
+      "DELETE FROM database_metadata WHERE key = ? OR substr(key, 1, length(?)) = ?",
+    )
+    .bind(pendingForwardGroupStateKey(key), messagePrefix, messagePrefix)
     .run();
 }
 
 async function readPendingForwardGroup(db, key) {
+  const messagePrefix = `${key}:message:`;
   const result = await db
-    .prepare("SELECT value FROM database_metadata WHERE key LIKE ? ORDER BY key")
-    .bind(`${key}:message:%`)
+    .prepare(
+      "SELECT value FROM database_metadata WHERE substr(key, 1, length(?)) = ? ORDER BY key",
+    )
+    .bind(messagePrefix, messagePrefix)
     .all();
   return (result.results ?? []).flatMap((row) => {
     try {

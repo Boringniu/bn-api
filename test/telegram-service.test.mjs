@@ -726,6 +726,14 @@ test("private forwarded media group inherits caption tags and removes every priv
     telegramCalls.map((call) => [call.method, call.body.message_id]),
     [["deleteMessage", 60], ["deleteMessage", 61], ["sendMessage", undefined]],
   );
+  assert.ok(
+    db.statements.some((statement) => statement.sql.includes("substr(key, 1, length(?))")),
+    "media-group lookup must use an exact prefix comparison for D1",
+  );
+  assert.ok(
+    !db.statements.some((statement) => statement.sql.includes("key LIKE")),
+    "media-group lookup must not interpret underscores in state keys as LIKE wildcards",
+  );
 });
 
 test("private forwarded all-media album deletes every member after one catalog entry", async () => {
