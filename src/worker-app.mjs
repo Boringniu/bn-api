@@ -158,6 +158,81 @@ export function createWorkerApp({
           return jsonResponse({ data: result }, 200, requestId);
         }
 
+        if (
+          request.method === "POST" &&
+          url.pathname === "/v1/channel/repair-forward-group"
+        ) {
+          assertAuthorized(request, env);
+          assertJsonRequest(request);
+          assertBodySize(request);
+          assertDb(env);
+          if (!telegramService?.stripForwardMediaGroup) {
+            throw new HttpError(
+              503,
+              "Telegram media-group repair is not available",
+              "service_not_configured",
+            );
+          }
+          const payload = parseForwardGroupRepairPayload(await readJson(request));
+          const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
+          if (!channelId) {
+            throw new HttpError(503, "Telegram channel is not configured", "service_not_configured");
+          }
+          const copiedMessageIds = await telegramService.stripForwardMediaGroup(
+            payload.message_ids.map((message_id) => ({ message_id })),
+            channelId,
+            env,
+          );
+          let catalog = null;
+          if (payload.catalog) {
+            const catalogPayload = {
+              source: {
+                provider: "channel",
+                external_id: `${channelId}:${copiedMessageIds[payload.catalog.video_index]}`,
+              },
+              title: payload.catalog.title,
+              code: payload.catalog.code,
+              raw_tags: payload.catalog.raw_tags,
+              ...(payload.catalog.actors.length > 0
+                ? { actors: payload.catalog.actors }
+                : {}),
+            };
+            const ingested = await ingestService.ingest(env.DB, catalogPayload);
+            const timestamp = new Date().toISOString();
+            await env.DB
+              .prepare(
+                `INSERT INTO channel_posts (
+                   media_id, tg_chat_id, tg_message_id, template_version,
+                   posted_at, updated_at
+                 ) VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (media_id) DO UPDATE SET
+                   tg_chat_id = excluded.tg_chat_id,
+                   tg_message_id = excluded.tg_message_id,
+                   updated_at = excluded.updated_at`,
+              )
+              .bind(
+                ingested.id,
+                channelId,
+                copiedMessageIds[payload.catalog.video_index],
+                versionConfig.release.version,
+                timestamp,
+                timestamp,
+              )
+              .run();
+            catalog = {
+              media_id: ingested.id,
+              status: ingested.status,
+              tg_message_id: copiedMessageIds[payload.catalog.video_index],
+            };
+          }
+          await telegramService.refreshPinnedIndex(env.DB, env);
+          return jsonResponse(
+            { data: { source_stripped: true, copied_message_ids: copiedMessageIds, catalog } },
+            200,
+            requestId,
+          );
+        }
+
         if (request.method === "POST" && url.pathname === "/v1/catalog/reindex") {
           assertAuthorized(request, env);
           assertDb(env);
@@ -580,6 +655,61 @@ async function readJson(request) {
   } catch {
     throw new HttpError(400, "request body must be valid JSON", "invalid_json");
   }
+}
+
+function parseForwardGroupRepairPayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new HttpError(400, "repair payload must be an object", "invalid_repair_payload");
+  }
+  const messageIds = payload.message_ids;
+  if (
+    !Array.isArray(messageIds) ||
+    messageIds.length < 2 ||
+    messageIds.length > 10 ||
+    messageIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+  ) {
+    throw new HttpError(
+      400,
+      "message_ids must contain 2 to 10 positive integer IDs",
+      "invalid_repair_payload",
+    );
+  }
+  if (new Set(messageIds).size !== messageIds.length) {
+    throw new HttpError(400, "message_ids must be unique", "invalid_repair_payload");
+  }
+  const catalog = payload.catalog;
+  if (catalog == null) {
+    return { message_ids: messageIds };
+  }
+  if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) {
+    throw new HttpError(400, "catalog must be an object", "invalid_repair_payload");
+  }
+  const { code, title, raw_tags: rawTags, actors, video_index: videoIndex } = catalog;
+  if (
+    typeof code !== "string" ||
+    !code.trim() ||
+    typeof title !== "string" ||
+    !title.trim() ||
+    !Array.isArray(rawTags) ||
+    rawTags.some((tag) => typeof tag !== "string" || !tag.trim()) ||
+    !Array.isArray(actors) ||
+    actors.some((actor) => typeof actor !== "string" || !actor.trim()) ||
+    !Number.isInteger(videoIndex) ||
+    videoIndex < 0 ||
+    videoIndex >= messageIds.length
+  ) {
+    throw new HttpError(400, "catalog fields are invalid", "invalid_repair_payload");
+  }
+  return {
+    message_ids: messageIds,
+    catalog: {
+      code: code.trim(),
+      title: title.trim(),
+      raw_tags: [...new Set(rawTags.map((tag) => tag.trim()))],
+      actors: [...new Set(actors.map((actor) => actor.trim()))],
+      video_index: videoIndex,
+    },
+  };
 }
 
 function jsonResponse(body, status, requestId) {

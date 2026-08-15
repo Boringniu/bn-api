@@ -75,6 +75,20 @@ jobs:
           echo "Telegram webhook configuration failed after 30 attempts." >&2
           exit 1
 
+      - name: Repair authorized forwarded media group once
+        if: contains(github.event.head_commit.message, '[repair-forward-group]')
+        env:
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+          WORKER_URL: https://bn-api.nnmmc326.workers.dev
+        run: |
+          set -euo pipefail
+          payload='{"message_ids":[30,31,32],"catalog":{"code":"ADN-115","title":"ADN-115 #松下纱荣子","raw_tags":["松下纱荣子"],"actors":["松下纱荣子"],"video_index":2}}'
+          curl --fail-with-body --silent --show-error \
+            --request POST "$WORKER_URL/v1/channel/repair-forward-group" \
+            --header "Authorization: Bearer $INGEST_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data "$payload" | jq '.data | {source_stripped, copied_message_ids, catalog}'
+
       - name: Reindex catalog and refresh pinned index
         env:
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}

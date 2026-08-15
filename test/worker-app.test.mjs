@@ -476,6 +476,93 @@ test("rejects unauthenticated Telegram webhooks on the root path", async () => {
   assert.equal(response.status, 401);
 });
 
+test("repairs an authorized forwarded media group and restores its catalog mapping", async () => {
+  const ingestService = createIngestStub({ id: "media_repaired", status: "approved" });
+  const telegramService = {
+    stripCalls: [],
+    refreshCalls: 0,
+    async stripForwardMediaGroup(posts, channelId) {
+      this.stripCalls.push({ posts, channelId });
+      return [40, 41, 42];
+    },
+    async refreshPinnedIndex() {
+      this.refreshCalls += 1;
+      return { outcome: "edited", pages: 1, message_ids: [34] };
+    },
+  };
+  const app = createWorkerApp({
+    ingestService,
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService,
+    versionConfig,
+  });
+  const db = new AuditD1();
+
+  const response = await app.fetch(
+    jsonRequest(
+      "https://api.example.com/v1/channel/repair-forward-group",
+      {
+        message_ids: [30, 31, 32],
+        catalog: {
+          code: "ADN-115",
+          title: "ADN-115 #松下纱荣子",
+          raw_tags: ["松下纱荣子"],
+          actors: ["松下纱荣子"],
+          video_index: 2,
+        },
+      },
+      "secret",
+    ),
+    {
+      DB: db,
+      INGEST_TOKEN: "secret",
+      TELEGRAM_CHANNEL_ID: "-1004396154285",
+      TELEGRAM_BOT_TOKEN: "bot-token",
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(telegramService.stripCalls, [
+    {
+      posts: [{ message_id: 30 }, { message_id: 31 }, { message_id: 32 }],
+      channelId: "-1004396154285",
+    },
+  ]);
+  assert.equal(ingestService.calls.length, 1);
+  assert.equal(ingestService.calls[0].payload.source.external_id, "-1004396154285:42");
+  assert.equal(ingestService.calls[0].payload.code, "ADN-115");
+  assert.equal(telegramService.refreshCalls, 1);
+  assert.deepEqual((await response.json()).data.copied_message_ids, [40, 41, 42]);
+});
+
+test("rejects invalid media-group repair payloads before contacting Telegram", async () => {
+  const telegramService = {
+    stripCalls: 0,
+    async stripForwardMediaGroup() {
+      this.stripCalls += 1;
+    },
+  };
+  const app = createWorkerApp({
+    ingestService: createIngestStub(),
+    reviewService: createReviewStub(),
+    searchService: createSearchStub(),
+    telegramService,
+    versionConfig,
+  });
+  const response = await app.fetch(
+    jsonRequest(
+      "https://api.example.com/v1/channel/repair-forward-group",
+      { message_ids: [30] },
+      "secret",
+    ),
+    { DB: new AuditD1(), INGEST_TOKEN: "secret", TELEGRAM_CHANNEL_ID: "-100" },
+  );
+
+  assert.equal(response.status, 400);
+  assert.equal(telegramService.stripCalls, 0);
+});
+
 test("removed channel distribution routes return 404", async () => {
   const app = createWorkerApp({
     ingestService: createIngestStub(),
