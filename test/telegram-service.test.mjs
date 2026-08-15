@@ -330,6 +330,56 @@ test("about command explains the direct query workflow", async () => {
   assert.ok(calls[0].body.text.includes("ADN、白雪"));
 });
 
+test("refresh command rejects non-admins and permits configured admins", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+  const env = {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_ADMIN_IDS: "1001, 2002",
+    TELEGRAM_CHANNEL_ID: "-1004396154285",
+  };
+
+  await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 3003 },
+        text: "/refresh",
+      },
+    },
+    env,
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls.at(-1).body.text, "权限不足");
+
+  const adminDb = new FakeD1({
+    batchResults: [
+      [{ display_name: "松下纱荣子" }],
+      [{ display_name: "人妻", weight: 1 }],
+    ],
+    firstResults: [null, null],
+  });
+  await service.handleUpdate(
+    adminDb,
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 2002 },
+        text: "/refresh",
+      },
+    },
+    env,
+  );
+  assert.ok(calls.some((call) => call.method === "pinChatMessage"));
+  assert.equal(calls.at(-1).body.text, "✅ 置顶索引已刷新");
+});
+
 test("private bot gives a specific message for recognized but uncollected searches", async () => {
   const telegramCalls = [];
   const searchService = createSearchStub({
