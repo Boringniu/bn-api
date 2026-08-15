@@ -130,14 +130,21 @@ export function createTelegramService({
         return this.handleSearchNavigation(db, update.callback_query, env);
       }
       const message = update?.message;
-      const text = message?.text?.trim();
-      // 私聊 Bot 只承担番号查询；群组和频道里的普通消息不响应。
-      if (!message || message.chat?.type !== "private" || !text) {
+      // 私聊只接受配置管理员从当前旧频道逐条转发的历史媒体；其他
+      // 媒体始终不处理，普通文字仍按原有方式用于搜索。
+      if (!message || message.chat?.type !== "private") {
         return null;
       }
       const chatId = message.chat.id;
       const userId = String(message.from?.id ?? "");
       const isUserAdmin = isAdmin(userId, env);
+      if (isLegacyChannelForward(message, env)) {
+        return this.ingestLegacyPrivateForward(db, message, env, isUserAdmin);
+      }
+      const text = message.text?.trim();
+      if (!text) {
+        return null;
+      }
 
       let reply;
       let replyMarkup = null;
@@ -196,6 +203,124 @@ export function createTelegramService({
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       });
       return { chat_id: chatId, replied: true };
+    },
+
+    // 管理员将旧频道历史资源逐条转发到 Bot 私聊时，只建立指向旧频道
+    // 原消息的搜索映射。成功后删除的仅是私聊副本，频道原消息绝不改动。
+    async ingestLegacyPrivateForward(db, message, env, isUserAdmin) {
+      if (!isUserAdmin) {
+        return { ignored: "private_forward_not_admin" };
+      }
+      const origin = legacyForwardOrigin(message, env);
+      const media = resolveTelegramMedia(message);
+      if (!origin || !media || !ingestService) {
+        return { ignored: "private_forward_invalid" };
+      }
+
+      const rawText = readPostText(message);
+      const fileName = (media.file_name ?? "").replace(
+        /\.(mp4|mkv|avi|wmv|ts)$/iu,
+        "",
+      );
+      const parsed = parseChannelTitle(
+        rawText || fileName || `视频 ${origin.messageId}`,
+      );
+      const actors = parsed.actors.filter((token) => {
+        const { resolution } = searchService.resolveQuery(token);
+        return (
+          resolution?.type === "actor" ||
+          /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(token) ||
+          token.length <= 8
+        );
+      });
+      const rawTags = parsed.raw_tags.map(cleanTopicValue).filter(Boolean);
+      const knownTagActors = resolveKnownActorTags(rawTags, searchService);
+      const resolvedActors = [...new Set([...actors, ...knownTagActors])];
+      const payload = {
+        source: {
+          provider: "channel",
+          external_id: `${origin.channelId}:${origin.messageId}`,
+        },
+        title: parsed.title,
+        raw_tags: rawTags,
+        metadata: {
+          tg_file_id: media.file_id,
+          tg_message_id: String(origin.messageId),
+        },
+      };
+      if (resolvedActors.length > 0) {
+        payload.actors = resolvedActors;
+      }
+      if (parsed.description) {
+        payload.description = parsed.description;
+      }
+      if (parsed.code) {
+        payload.code = parsed.code;
+      }
+
+      const result = await ingestService.ingest(db, payload);
+      const timestamp = new Date().toISOString();
+      await db
+        .prepare(
+          `INSERT INTO channel_posts (
+             media_id, tg_chat_id, tg_message_id, template_version,
+             posted_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (media_id) DO UPDATE SET
+             tg_chat_id = excluded.tg_chat_id,
+             tg_message_id = excluded.tg_message_id,
+             updated_at = excluded.updated_at`,
+        )
+        .bind(
+          result.id,
+          origin.channelId,
+          origin.messageId,
+          versionConfig.release.version,
+          timestamp,
+          timestamp,
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO media_files (
+             media_id, tg_file_id, tg_file_unique_id, source_chat_id,
+             source_message_id, imported_from, created_at
+           ) VALUES (?, ?, ?, ?, ?, 'private_forward', ?)
+           ON CONFLICT (media_id) DO UPDATE SET
+             tg_file_id = excluded.tg_file_id,
+             tg_file_unique_id = excluded.tg_file_unique_id,
+             source_chat_id = excluded.source_chat_id,
+             source_message_id = excluded.source_message_id`,
+        )
+        .bind(
+          result.id,
+          media.file_id,
+          media.file_unique_id ?? null,
+          origin.channelId,
+          String(origin.messageId),
+          timestamp,
+        )
+        .run();
+
+      await this.callTelegram(env, "deleteMessage", {
+        chat_id: message.chat.id,
+        message_id: message.message_id,
+      });
+      const exists = result.outcome === "updated";
+      await this.callTelegram(env, "sendMessage", {
+        chat_id: message.chat.id,
+        text: exists
+          ? `ℹ️ 已存在并更新 #${escapeHtml(parsed.code ?? "历史资源")}`
+          : `✅ 已收录 #${escapeHtml(parsed.code ?? "历史资源")}`,
+        parse_mode: "HTML",
+      });
+      return {
+        ingested: result.id,
+        status: result.status,
+        source_channel_message_id: origin.messageId,
+        private_copy_deleted: true,
+        existing: exists,
+      };
     },
 
     // 私人频道只由管理员维护：原生发布直接入库；经授权的转发则复制为
@@ -936,6 +1061,31 @@ function shouldStripForwardSource(post, env) {
     String(env?.TELEGRAM_STRIP_FORWARD_SOURCE ?? "").toLowerCase() === "true" &&
     Boolean(post?.forward_origin ?? post?.forward_from)
   );
+}
+
+function isLegacyChannelForward(message, env) {
+  return Boolean(resolveTelegramMedia(message) && legacyForwardOrigin(message, env));
+}
+
+function legacyForwardOrigin(message, env) {
+  const channelId = String(env?.TELEGRAM_CHANNEL_ID ?? "");
+  const origin = message?.forward_origin;
+  if (
+    origin?.type === "channel" &&
+    String(origin.chat?.id ?? "") === channelId &&
+    Number.isInteger(Number(origin.message_id)) &&
+    Number(origin.message_id) > 0
+  ) {
+    return { channelId, messageId: Number(origin.message_id) };
+  }
+  if (
+    String(message?.forward_from_chat?.id ?? "") === channelId &&
+    Number.isInteger(Number(message?.forward_from_message_id)) &&
+    Number(message.forward_from_message_id) > 0
+  ) {
+    return { channelId, messageId: Number(message.forward_from_message_id) };
+  }
+  return null;
 }
 
 function readPostText(post) {

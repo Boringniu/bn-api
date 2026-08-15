@@ -506,36 +506,125 @@ test("private bot adds next-page navigation and edits the result on callback", a
   });
 });
 
-test("private media is never accepted as a submission", async () => {
+test("admin private forward from the configured legacy channel is indexed then deleted", async () => {
   const telegramCalls = [];
+  const ingestCalls = [];
   const service = createTelegramService({
     categoryConfig: configs.get("category").data,
     displayConfig,
-    ingestService: { async ingest() { throw new Error("must not ingest"); } },
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_legacy_1", outcome: "created", status: "approved" };
+      },
+    },
     searchConfig: configs.get("search").data,
     searchService: createSearchStub(),
     versionConfig,
     fetchImpl: async (url, init) => {
-      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      telegramCalls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
       return { json: async () => ({ ok: true, result: {} }) };
     },
   });
+  const db = new FakeD1();
 
   const result = await service.handleUpdate(
-    new FakeD1(),
+    db,
     {
       message: {
+        message_id: 12,
         chat: { id: 111, type: "private" },
         from: { id: 222 },
         caption: "ADN-001 #人妻",
-        video: { file_id: "PRIVATE", file_name: "ADN-001.mp4" },
+        video: { file_id: "PRIVATE", file_unique_id: "UNIQUE", file_name: "ADN-001.mp4" },
+        forward_origin: {
+          type: "channel",
+          chat: { id: -1004460339207 },
+          message_id: 777,
+        },
       },
     },
-    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "111" },
+    {
+      TELEGRAM_BOT_TOKEN: "bot-token",
+      TELEGRAM_ADMIN_IDS: "222",
+      TELEGRAM_CHANNEL_ID: "-1004460339207",
+    },
   );
 
-  assert.equal(result, null);
-  assert.equal(telegramCalls.length, 0);
+  assert.equal(result.private_copy_deleted, true);
+  assert.equal(result.source_channel_message_id, 777);
+  assert.equal(ingestCalls.length, 1);
+  assert.equal(ingestCalls[0].source.external_id, "-1004460339207:777");
+  assert.equal(ingestCalls[0].code, "ADN-001");
+  assert.deepEqual(ingestCalls[0].raw_tags, ["人妻"]);
+  assert.deepEqual(telegramCalls.map((call) => call.method), ["deleteMessage", "sendMessage"]);
+  assert.equal(telegramCalls[0].body.message_id, 12);
+  assert.ok(telegramCalls[1].body.text.includes("已收录 #ADN-001"));
+  assert.ok(
+    db.statements.some((statement) =>
+      typeof statement.sql === "string" &&
+      statement.sql.includes("INSERT INTO channel_posts") &&
+      Array.isArray(statement.values) &&
+      statement.values.includes(777),
+    ),
+  );
+});
+
+test("legacy private forwarding rejects non-admins and other origins", async () => {
+  const ingestCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "must_not_happen" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+  });
+  const baseMessage = {
+    message_id: 12,
+    chat: { id: 111, type: "private" },
+    caption: "ADN-001 #人妻",
+    video: { file_id: "PRIVATE", file_name: "ADN-001.mp4" },
+    forward_origin: {
+      type: "channel",
+      chat: { id: -1004460339207 },
+      message_id: 777,
+    },
+  };
+  const env = {
+    TELEGRAM_ADMIN_IDS: "222",
+    TELEGRAM_CHANNEL_ID: "-1004460339207",
+  };
+
+  const nonAdmin = await service.handleUpdate(
+    new FakeD1(),
+    { message: { ...baseMessage, from: { id: 333 } } },
+    env,
+  );
+  const otherChannel = await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        ...baseMessage,
+        from: { id: 222 },
+        forward_origin: {
+          type: "channel",
+          chat: { id: -1004396154285 },
+          message_id: 888,
+        },
+      },
+    },
+    env,
+  );
+
+  assert.deepEqual(nonAdmin, { ignored: "private_forward_not_admin" });
+  assert.equal(otherChannel, null);
+  assert.equal(ingestCalls.length, 0);
 });
 
 test("bot ignores group messages", async () => {
