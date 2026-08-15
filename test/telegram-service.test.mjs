@@ -275,6 +275,61 @@ test("private bot accepts actress-directory searches", async () => {
   assert.equal(telegramCalls[0].body.disable_web_page_preview, true);
 });
 
+test("index command links to the first pinned channel index message", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+  const db = new FakeD1({ firstResults: [{ value: "[4]" }] });
+
+  await service.handleUpdate(
+    db,
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        text: "/index",
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-1004396154285" },
+  );
+
+  assert.equal(calls[0].method, "sendMessage");
+  assert.equal(
+    calls[0].body.text,
+    '📚 <a href="https://t.me/c/4396154285/4">跳转频道索引</a>',
+  );
+});
+
+test("about command explains the direct query workflow", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+
+  await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        text: "/about",
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  assert.equal(calls[0].method, "sendMessage");
+  assert.ok(calls[0].body.text.includes("BN·media"));
+  assert.ok(calls[0].body.text.includes("ADN、白雪"));
+});
+
 test("private bot gives a specific message for recognized but uncollected searches", async () => {
   const telegramCalls = [];
   const searchService = createSearchStub({
@@ -479,15 +534,23 @@ test("configures webhook to receive channel posts and channel edits", async () =
     ],
   });
   assert.ok(telegramCalls[0].url.includes("/setWebhook"));
-  assert.deepEqual(telegramCalls[1].body, {});
-  assert.ok(telegramCalls[1].url.includes("/getWebhookInfo"));
+  assert.deepEqual(telegramCalls[1].body, {
+    commands: [
+      { command: "index", description: "跳转频道索引" },
+      { command: "refresh", description: "刷新频道索引（管理员）" },
+      { command: "about", description: "简介说明" },
+    ],
+  });
+  assert.ok(telegramCalls[1].url.includes("/setMyCommands"));
   assert.deepEqual(telegramCalls[2].body, {});
-  assert.ok(telegramCalls[2].url.includes("/getMe"));
-  assert.deepEqual(telegramCalls[3].body, {
+  assert.ok(telegramCalls[2].url.includes("/getWebhookInfo"));
+  assert.deepEqual(telegramCalls[3].body, {});
+  assert.ok(telegramCalls[3].url.includes("/getMe"));
+  assert.deepEqual(telegramCalls[4].body, {
     chat_id: "-1004460339207",
     user_id: 8101858846,
   });
-  assert.ok(telegramCalls[3].url.includes("/getChatMember"));
+  assert.ok(telegramCalls[4].url.includes("/getChatMember"));
   assert.deepEqual(result.allowed_updates, [
     "message",
     "callback_query",

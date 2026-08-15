@@ -135,10 +135,21 @@ export function createTelegramService({
 
       let reply;
       let replyMarkup = null;
-      if (text === "/start" || text === "/help") {
+      if (text === "/index") {
+        const [indexMessageId] = await readIndexMessageIds(db);
+        const indexUrl = channelMessageUrl(
+          env.TELEGRAM_CHANNEL_ID,
+          indexMessageId,
+        );
+        reply = indexUrl
+          ? `📚 <a href="${escapeHtml(indexUrl)}">跳转频道索引</a>`
+          : "频道索引暂未生成。";
+      } else if (text === "/about" || text === "/start" || text === "/help") {
         reply =
+          "BN·media\n\n" +
           "直接输入番号前缀或女优名即可查询。\n" +
           "例如：ADN、白雪\n\n" +
+          "/index - 跳转频道索引\n" +
           "/refresh - 刷新频道索引（管理员）";
       } else if (text === "/refresh") {
         if (!isUserAdmin) {
@@ -460,6 +471,13 @@ export function createTelegramService({
           "callback_query",
           "channel_post",
           "edited_channel_post",
+        ],
+      });
+      await this.callTelegram(env, "setMyCommands", {
+        commands: [
+          { command: "index", description: "跳转频道索引" },
+          { command: "refresh", description: "刷新频道索引（管理员）" },
+          { command: "about", description: "简介说明" },
         ],
       });
       const info = await this.callTelegram(env, "getWebhookInfo", {});
