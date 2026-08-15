@@ -361,7 +361,10 @@ async function reindexCatalog({
         "invalid_stored_payload",
       );
     }
-    await ingestService.ingest(db, normalizeCatalogPayload(payload));
+    await ingestService.ingest(
+      db,
+      normalizeCatalogPayload(payload, searchService),
+    );
   }
 
   const remainingRow = await db
@@ -392,13 +395,17 @@ async function reindexCatalog({
   };
 }
 
-function normalizeCatalogPayload(payload) {
+function normalizeCatalogPayload(payload, searchService) {
   const tags = (payload.raw_tags ?? [])
     .map((rawTag) => rawTag.trim().replace(/[，,。.!！?？；;：:、]+$/gu, ""))
     .filter(Boolean);
+  const tagActors = tags.flatMap((tag) => {
+    const { resolution } = searchService.resolveQuery(tag);
+    return resolution?.type === "actor" ? [resolution.display_name] : [];
+  });
   return {
     ...payload,
-    actors: [...new Set(payload.actors ?? [])],
+    actors: [...new Set([...(payload.actors ?? []), ...tagActors])],
     raw_tags: [...new Set(tags)],
   };
 }

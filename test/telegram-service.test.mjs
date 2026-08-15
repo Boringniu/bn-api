@@ -33,6 +33,8 @@ const sampleMedia = {
     { tag_id: "tag_story", display_name: "剧情" },
     { tag_id: "tag_chinese_subtitle", display_name: "中文字幕" },
   ],
+  channel_chat_id: "-1004396154285",
+  channel_message_id: 88,
 };
 
 test("parseChannelTitle handles the observed caption formats", () => {
@@ -125,35 +127,18 @@ test("caps channel actors and tags at configured maximums", () => {
   assert.equal((text.match(/#标签/gu) ?? []).length, 8);
 });
 
-test("bot results include code and hide source links from strangers", () => {
-  const service = createService();
-  const result = {
-    query: "希岛爱理",
-    page: 1,
-    page_size: 10,
-    total: 1,
-    results: [{ ...sampleMedia, source_url: "https://example.com/secret" }],
-  };
-
-  const publicText = service.renderBotResults(result, { isAuthorized: false });
-  assert.ok(publicText.includes("ABP-123"));
-  assert.ok(publicText.includes("共 1 条结果"));
-  assert.ok(!publicText.includes("https://example.com/secret"));
-
-  const adminText = service.renderBotResults(result, { isAuthorized: true });
-  assert.ok(adminText.includes("https://example.com/secret"));
-});
-
-test("bot results aggregate multiple videos under one code", () => {
+test("bot results render only a clickable code and actress hashtag", () => {
   const text = createService().renderBotResults({
-    page: 1,
-    page_size: 10,
-    total: 1,
     results: [{ ...sampleMedia, video_count: 3 }],
   });
 
-  assert.equal((text.match(/ABP-123/gu) ?? []).length, 1);
-  assert.ok(text.includes("（3 个视频）"));
+  assert.equal(
+    text,
+    '<a href="https://t.me/c/4396154285/88">#ABP-123</a>  #希岛爱理',
+  );
+  assert.ok(!text.includes("3 个视频"));
+  assert.ok(!text.includes("人妻"));
+  assert.ok(!text.includes("共 1 条结果"));
 });
 
 test("strips forwarded source by copying before deleting the original", async () => {
@@ -255,7 +240,7 @@ test("webhook update runs a search, logs it, and replies", async () => {
   assert.equal(telegramCalls[0].body.chat_id, 111);
 });
 
-test("private bot rejects non-code searches without querying media", async () => {
+test("private bot accepts actress-directory searches", async () => {
   const telegramCalls = [];
   const searchService = createSearchStub({
     resolution: { type: "actor", match: "exact_alias", actor_id: "actor_000001" },
@@ -282,9 +267,12 @@ test("private bot rejects non-code searches without querying media", async () =>
     { TELEGRAM_BOT_TOKEN: "bot-token" },
   );
 
-  assert.equal(searchService.findCalls.length, 0);
+  assert.equal(searchService.findCalls.length, 1);
+  assert.deepEqual(searchService.findCalls[0].filters, { actor_id: "actor_000001" });
   assert.equal(telegramCalls.length, 1);
-  assert.equal(telegramCalls[0].body.text, "请输入完整番号，例如 ABP-123。");
+  assert.ok(telegramCalls[0].body.text.includes("#ABP-123"));
+  assert.equal(telegramCalls[0].body.parse_mode, "HTML");
+  assert.equal(telegramCalls[0].body.disable_web_page_preview, true);
 });
 
 test("private media is never accepted as a submission", async () => {
@@ -828,7 +816,7 @@ test("inherits hashtags from a preceding channel context message", async () => {
   assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
 });
 
-test("preserves an actor-name hashtag as a normal topic", async () => {
+test("preserves an actor-name hashtag as a topic and actress association", async () => {
   const ingestCalls = [];
   const service = createTelegramService({
     categoryConfig: configs.get("category").data,
@@ -864,7 +852,7 @@ test("preserves an actor-name hashtag as a normal topic", async () => {
   );
 
   assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
-  assert.equal("actors" in ingestCalls[0], false);
+  assert.deepEqual(ingestCalls[0].actors, ["松下纱荣子"]);
 });
 
 function createSearchStub({ resolution = null, media = [] } = {}) {

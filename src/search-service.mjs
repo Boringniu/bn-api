@@ -84,7 +84,10 @@ export function createSearchService({
       return { query, resolution: null };
     },
 
-    async findMedia(db, { filters = {}, page = 1, pageSize } = {}) {
+    async findMedia(
+      db,
+      { filters = {}, page = 1, pageSize, includeChannelLinks = false } = {},
+    ) {
       assertDatabase(db);
       const size = clampPageSize(pageSize, search);
       const currentPage = Number.isInteger(page) && page > 0 ? page : 1;
@@ -102,9 +105,16 @@ export function createSearchService({
       // 同番号的多个频道视频是同一媒体条目的附件，私聊查询按番号聚合。
       // 未识别番号的旧数据仍按单条媒体独立返回。
       const groupKeySql = "COALESCE(m.normalized_code, m.id)";
+      const channelColumns = includeChannelLinks
+        ? ", cp.tg_chat_id AS channel_chat_id, cp.tg_message_id AS channel_message_id"
+        : "";
+      const channelJoin = includeChannelLinks
+        ? "LEFT JOIN channel_posts cp ON cp.media_id = m.id"
+        : "";
       const listSql = `
-        SELECT ${PUBLIC_MEDIA_COLUMNS}, COUNT(DISTINCT m.id) AS video_count
+        SELECT ${PUBLIC_MEDIA_COLUMNS}${channelColumns}, COUNT(DISTINCT m.id) AS video_count
         FROM media m
+        ${channelJoin}
         ${joins.join("\n")}
         ${whereSql}
         GROUP BY ${groupKeySql}
@@ -235,6 +245,12 @@ export function createSearchService({
         display_name: tag.display_name_snapshot,
       })),
       video_count: Number(row.video_count ?? 1),
+      ...(row.channel_chat_id && row.channel_message_id
+        ? {
+            channel_chat_id: row.channel_chat_id,
+            channel_message_id: row.channel_message_id,
+          }
+        : {}),
     };
   }
 }

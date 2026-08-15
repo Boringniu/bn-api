@@ -58,51 +58,13 @@ export function createTelegramService({
       return text.replace(/\n{3,}/gu, "\n\n").trim();
     },
 
-    renderBotResults({ query, page, page_size, total, results }, { isAuthorized = false } = {}) {
+    renderBotResults({ results }) {
       if (results.length === 0) {
         return "没有找到匹配的内容。";
       }
-      const lines = [];
-      if (botResult.show_video_count) {
-        lines.push(`共 ${total} 条结果`);
-      }
-      const start = (page - 1) * page_size;
-      for (const [index, media] of results.entries()) {
-        const parts = [];
-        if (botResult.show_result_number) {
-          parts.push(`${start + index + 1}.`);
-        }
-        if (botResult.show_code && media.code) {
-          parts.push(media.code);
-        }
-        if (botResult.show_actors && media.actors.length > 0) {
-          parts.push(
-            media.actors
-              .slice(0, botResult.max_actors)
-              .map((actor) => actor.display_name)
-              .join(" "),
-          );
-        }
-        if (botResult.show_category && media.category) {
-          parts.push(`[${media.category.display_name}]`);
-        }
-        if (botResult.show_tags && media.tags.length > 0) {
-          parts.push(
-            media.tags
-              .slice(0, botResult.max_tags)
-              .map((tag) => `#${tag.display_name}`)
-              .join(" "),
-          );
-        }
-        if (Number(media.video_count ?? 1) > 1) {
-          parts.push(`（${media.video_count} 个视频）`);
-        }
-        lines.push(parts.join(" "));
-        if (botResult.show_source_link && isAuthorized && media.source_url) {
-          lines.push(media.source_url);
-        }
-      }
-      return lines.join("\n");
+      return results
+        .map((media) => renderDirectoryEntry(media))
+        .join("\n");
     },
 
     async handleUpdate(db, update, env) {
@@ -146,13 +108,15 @@ export function createTelegramService({
       } else {
         const query = text.replace(/^\/search\s+/u, "");
         const { resolution } = searchService.resolveQuery(query);
-        const isCodeQuery =
-          resolution?.type === "code" || resolution?.type === "code_prefix";
-        const searchResult = isCodeQuery
+        const isDirectoryQuery = ["code", "code_prefix", "actor"].includes(
+          resolution?.type,
+        );
+        const searchResult = isDirectoryQuery
           ? await searchService.findMedia(db, {
               filters: resolutionFilters(resolution),
               page: 1,
               pageSize: botResult.page_size,
+              includeChannelLinks: true,
             })
           : { page: 1, page_size: botResult.page_size, total: 0, results: [] };
 
@@ -163,17 +127,16 @@ export function createTelegramService({
           resultCount: searchResult.total,
         });
 
-        reply = isCodeQuery
-          ? this.renderBotResults(
-              { query, ...searchResult },
-              { isAuthorized: isUserAdmin },
-            )
-          : "请输入完整番号，例如 ABP-123。";
+        reply = isDirectoryQuery
+          ? this.renderBotResults({ query, ...searchResult })
+          : "请输入番号前缀（如 ADN）或女优名。";
       }
 
       await this.callTelegram(env, "sendMessage", {
         chat_id: chatId,
         text: reply,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
       });
       return { chat_id: chatId, replied: true };
     },
@@ -262,6 +225,8 @@ export function createTelegramService({
       const rawTags = [
         ...new Set([...contentTags, ...(inheritedContext?.raw_tags ?? [])]),
       ];
+      const knownTagActors = resolveKnownActorTags(rawTags, searchService);
+      const resolvedActors = [...new Set([...actors, ...knownTagActors])];
 
       const payload = {
         source: {
@@ -275,8 +240,8 @@ export function createTelegramService({
           tg_message_id: String(post.message_id),
         },
       };
-      if (actors.length > 0) {
-        payload.actors = actors;
+      if (resolvedActors.length > 0) {
+        payload.actors = resolvedActors;
       }
       if (parsed.description) {
         payload.description = parsed.description;
@@ -639,7 +604,37 @@ export function createTelegramService({
     },
   });
 
-  function hashtag(displayName, prefix) {
+  function renderDirectoryEntry(media) {
+  const code = media.code ? `#${media.code}` : "#未知编号";
+  const channelUrl = channelMessageUrl(
+    media.channel_chat_id,
+    media.channel_message_id,
+  );
+  const codeEntry = channelUrl
+    ? `<a href="${escapeHtml(channelUrl)}">${escapeHtml(code)}</a>`
+    : escapeHtml(code);
+  const actress = media.actors?.[0]?.display_name;
+  return actress ? `${codeEntry}  #${escapeHtml(actress)}` : codeEntry;
+}
+
+function channelMessageUrl(chatId, messageId) {
+  const chat = String(chatId ?? "");
+  const message = Number(messageId);
+  if (!/^-100\d+$/u.test(chat) || !Number.isInteger(message) || message < 1) {
+    return null;
+  }
+  return `https://t.me/c/${chat.slice(4)}/${message}`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function hashtag(displayName, prefix) {
     if (!hashtagRules.enabled) {
       return `${prefix}${displayName}`;
     }
@@ -730,6 +725,13 @@ export function parseChannelTitle(rawTitle) {
 
 function cleanTopicValue(value) {
   return value.trim().replace(/[，,。.!！?？；;：:、]+$/gu, "");
+}
+
+function resolveKnownActorTags(rawTags, searchService) {
+  return rawTags.flatMap((tag) => {
+    const { resolution } = searchService.resolveQuery(tag);
+    return resolution?.type === "actor" ? [resolution.display_name] : [];
+  });
 }
 
 function chunkTags(tags) {
@@ -890,6 +892,8 @@ function buildEditedChannelPayload({
     .map(cleanTopicValue)
     .filter(Boolean);
   const rawTags = [...new Set(contentTags)];
+  const knownTagActors = resolveKnownActorTags(rawTags, searchService);
+  const resolvedActors = [...new Set([...actors, ...knownTagActors])];
   const payload = {
     ...previousPayload,
     source: {
@@ -905,8 +909,8 @@ function buildEditedChannelPayload({
       tg_message_id: String(post.message_id),
     },
   };
-  if (actors.length > 0) {
-    payload.actors = [...new Set(actors)];
+  if (resolvedActors.length > 0) {
+    payload.actors = resolvedActors;
   } else {
     delete payload.actors;
   }
