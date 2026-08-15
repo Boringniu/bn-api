@@ -230,14 +230,9 @@ export function createTelegramService({
         message.chat.id,
         message.media_group_id,
       );
-      const postsAfterAppend = await appendPendingForwardGroup(db, groupKey, message);
-      if (!resolveTelegramMedia(message)) {
-        return {
-          buffered: true,
-          media_group_id: message.media_group_id,
-          collected: postsAfterAppend.length,
-        };
-      }
+      await appendPendingForwardGroup(db, groupKey, message);
+      // 每个成员都等待同组消息收齐。最后一条可能是图片或其他非收录
+      // 成员；仍由它统一触发“从同组选择第一个可收录视频”的既有路径。
       await delay(mediaGroupSettleMs);
 
       const posts = sortChannelPosts(await readPendingForwardGroup(db, groupKey));
@@ -249,12 +244,11 @@ export function createTelegramService({
           collected: posts.length,
         };
       }
-      if (!(await claimPendingForwardGroup(db, groupKey))) {
-        return { buffered: true, media_group_id: message.media_group_id };
-      }
-
       const mediaPost = posts.find((post) => resolveTelegramMedia(post));
       if (!mediaPost) {
+        return { buffered: true, media_group_id: message.media_group_id };
+      }
+      if (!(await claimPendingForwardGroup(db, groupKey))) {
         return { buffered: true, media_group_id: message.media_group_id };
       }
       try {

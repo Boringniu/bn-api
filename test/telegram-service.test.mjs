@@ -705,6 +705,7 @@ test("private forwarded media group inherits caption tags and removes every priv
   const db = new FakeD1({
     allResults: [
       [storedCaption],
+      [storedCaption],
       [storedCaption, storedVideo],
       [storedCaption, storedVideo],
     ],
@@ -716,7 +717,6 @@ test("private forwarded media group inherits caption tags and removes every priv
   assert.deepEqual(buffered, {
     buffered: true,
     media_group_id: groupId,
-    collected: 1,
   });
   assert.equal(completed.source_channel_message_id, 778);
   assert.equal(ingestCalls[0].code, "ADN-002");
@@ -811,6 +811,98 @@ test("private forwarded all-media album deletes every member after one catalog e
   assert.deepEqual(
     telegramCalls.map((call) => [call.method, call.body.message_id]),
     [["deleteMessage", 70], ["deleteMessage", 71], ["sendMessage", undefined]],
+  );
+});
+
+test("private forwarded album ingests its video when the last member is non-media", async () => {
+  const telegramCalls = [];
+  const ingestCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_group_trailing_photo", outcome: "created", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    mediaGroupSettleMs: 0,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: {} }) };
+    },
+  });
+  const env = {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_ADMIN_IDS: "222",
+    TELEGRAM_CHANNEL_ID: "-1004460339207",
+  };
+  const origin = {
+    type: "channel",
+    chat: { id: -1004460339207 },
+    message_id: 780,
+  };
+  const groupId = "private_album_trailing_photo";
+  const videoPost = {
+    message_id: 72,
+    chat: { id: 111, type: "private" },
+    from: { id: 222 },
+    media_group_id: groupId,
+    caption: "ADN-200 #松下纱荣子",
+    video: { file_id: "VIDEO", file_name: "ADN-200.mp4" },
+    forward_origin: origin,
+  };
+  const firstPhoto = {
+    message_id: 73,
+    chat: { id: 111, type: "private" },
+    from: { id: 222 },
+    media_group_id: groupId,
+    photo: [{ file_id: "PHOTO1" }],
+    forward_origin: origin,
+  };
+  const lastPhoto = {
+    message_id: 74,
+    chat: { id: 111, type: "private" },
+    from: { id: 222 },
+    media_group_id: groupId,
+    photo: [{ file_id: "PHOTO2" }],
+    forward_origin: origin,
+  };
+  const storedPosts = [videoPost, firstPhoto, lastPhoto].map((post) => ({
+    value: JSON.stringify(post),
+  }));
+  const db = new FakeD1({
+    allResults: [
+      storedPosts,
+      storedPosts,
+      storedPosts,
+      storedPosts,
+      storedPosts,
+      storedPosts,
+    ],
+  });
+
+  const first = await service.handleUpdate(db, { message: videoPost }, env);
+  const second = await service.handleUpdate(db, { message: firstPhoto }, env);
+  const completed = await service.handleUpdate(db, { message: lastPhoto }, env);
+
+  assert.equal(first.buffered, true);
+  assert.equal(second.buffered, true);
+  assert.equal(completed.source_channel_message_id, 780);
+  assert.equal(ingestCalls.length, 1);
+  assert.equal(ingestCalls[0].code, "ADN-200");
+  assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
+  assert.deepEqual(
+    telegramCalls.map((call) => [call.method, call.body.message_id]),
+    [
+      ["deleteMessage", 72],
+      ["deleteMessage", 73],
+      ["deleteMessage", 74],
+      ["sendMessage", undefined],
+    ],
   );
 });
 
