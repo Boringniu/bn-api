@@ -63,7 +63,7 @@ export function createTelegramService({
         return "没有找到匹配的内容。";
       }
       return results
-        .map((media) => renderDirectoryEntry(media))
+        .map((media, index) => renderDirectoryEntry(media, index + 1))
         .join("\n");
     },
 
@@ -604,7 +604,7 @@ export function createTelegramService({
     },
   });
 
-  function renderDirectoryEntry(media) {
+  function renderDirectoryEntry(media, index) {
   const code = media.code ? `#${media.code}` : "#未知编号";
   const channelUrl = channelMessageUrl(
     media.channel_chat_id,
@@ -614,7 +614,8 @@ export function createTelegramService({
     ? `<a href="${escapeHtml(channelUrl)}">${escapeHtml(code)}</a>`
     : escapeHtml(code);
   const actress = media.actors?.[0]?.display_name;
-  return actress ? `${codeEntry}  #${escapeHtml(actress)}` : codeEntry;
+  const entry = actress ? `${codeEntry}  #${escapeHtml(actress)}` : codeEntry;
+  return `${index} • ${entry}`;
 }
 
 function channelMessageUrl(chatId, messageId) {

@@ -134,7 +134,7 @@ test("bot results render only a clickable code and actress hashtag", () => {
 
   assert.equal(
     text,
-    '<a href="https://t.me/c/4396154285/88">#ABP-123</a>  #希岛爱理',
+    '1 • <a href="https://t.me/c/4396154285/88">#ABP-123</a>  #希岛爱理',
   );
   assert.ok(!text.includes("3 个视频"));
   assert.ok(!text.includes("人妻"));
