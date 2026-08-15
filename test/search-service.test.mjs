@@ -126,6 +126,15 @@ test("findMedia joins associations for actor and tag filters", async () => {
   assert.match(listSql, /ft\.search_enabled = 1/);
 });
 
+test("findMedia filters an arbitrary native hashtag from the stored caption", async () => {
+  const db = new FakeD1();
+  await service.findMedia(db, { filters: { raw_tag: "剧情" } });
+
+  const listStatement = db.statements[0];
+  assert.match(listStatement.sql, /json_each\(m\.raw_payload_json, '\$\.raw_tags'\)/);
+  assert.ok(listStatement.values.includes("剧情"));
+});
+
 test("findMedia stops paging at the configured result ceiling", async () => {
   const db = new FakeD1();
   const result = await service.findMedia(db, { page: 21, pageSize: 10 });

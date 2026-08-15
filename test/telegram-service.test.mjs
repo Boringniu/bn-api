@@ -127,17 +127,16 @@ test("caps channel actors and tags at configured maximums", () => {
   assert.equal((text.match(/#标签/gu) ?? []).length, 8);
 });
 
-test("bot results render only a clickable code and actress hashtag", () => {
+test("bot results render a clickable code and every native hashtag", () => {
   const text = createService().renderBotResults({
-    results: [{ ...sampleMedia, video_count: 3 }],
+    results: [{ ...sampleMedia, raw_tags: ["人妻", "剧情", "中文字幕"], video_count: 3 }],
   });
 
   assert.equal(
     text,
-    '1 • <a href="https://t.me/c/4396154285/88">#ABP-123</a>  #希岛爱理',
+    '1 • <a href="https://t.me/c/4396154285/88">#ABP-123</a>  <a href="https://t.me/c/4396154285/88">#人妻</a>  <a href="https://t.me/c/4396154285/88">#剧情</a>  <a href="https://t.me/c/4396154285/88">#中文字幕</a>',
   );
   assert.ok(!text.includes("3 个视频"));
-  assert.ok(!text.includes("人妻"));
   assert.ok(!text.includes("共 1 条结果"));
 });
 
@@ -308,6 +307,39 @@ test("private bot accepts actress-directory searches", async () => {
   assert.ok(telegramCalls[0].body.text.includes("#ABP-123"));
   assert.equal(telegramCalls[0].body.parse_mode, "HTML");
   assert.equal(telegramCalls[0].body.disable_web_page_preview, true);
+});
+
+test("private bot searches any native hashtag and returns a fully linked resource entry", async () => {
+  const telegramCalls = [];
+  const searchService = createSearchStub({
+    media: [{ ...sampleMedia, raw_tags: ["希岛爱理", "剧情", "人妻"] }],
+  });
+  const service = createService({
+    searchService,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+
+  await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        text: "#剧情",
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  assert.deepEqual(searchService.findCalls[0].filters, { raw_tag: "剧情" });
+  const resultText = telegramCalls[0].body.text;
+  for (const label of ["#ABP-123", "#希岛爱理", "#剧情", "#人妻"]) {
+    assert.ok(resultText.includes(`>${label}</a>`), label);
+  }
+  assert.equal((resultText.match(/https:\/\/t\.me\/c\/4396154285\/88/gu) ?? []).length, 4);
 });
 
 test("index command links to the first pinned channel index message", async () => {
@@ -646,7 +678,7 @@ test("private forwarded media group inherits caption tags and removes every priv
   assert.equal(completed.source_channel_message_id, 778);
   assert.equal(ingestCalls[0].code, "ADN-002");
   assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
-  assert.deepEqual(ingestCalls[0].actors, ["松下纱荣子"]);
+  assert.equal(ingestCalls[0].actors, undefined);
   assert.deepEqual(
     telegramCalls.map((call) => [call.method, call.body.message_id]),
     [["deleteMessage", 60], ["deleteMessage", 61], ["sendMessage", undefined]],

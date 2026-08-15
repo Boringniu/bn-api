@@ -241,17 +241,7 @@ export function createTelegramService({
       const parsed = parseChannelTitle(
         rawText || fileName || `视频 ${origin.messageId}`,
       );
-      const actors = parsed.actors.filter((token) => {
-        const { resolution } = searchService.resolveQuery(token);
-        return (
-          resolution?.type === "actor" ||
-          /[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(token) ||
-          token.length <= 8
-        );
-      });
       const rawTags = parsed.raw_tags.map(cleanTopicValue).filter(Boolean);
-      const knownTagActors = resolveKnownActorTags(rawTags, searchService);
-      const resolvedActors = [...new Set([...actors, ...knownTagActors])];
       const payload = {
         source: {
           provider: "channel",
@@ -264,9 +254,6 @@ export function createTelegramService({
           tg_message_id: String(origin.messageId),
         },
       };
-      if (resolvedActors.length > 0) {
-        payload.actors = resolvedActors;
-      }
       if (parsed.description) {
         payload.description = parsed.description;
       }
@@ -862,8 +849,12 @@ export function createTelegramService({
   });
 
   async function resolveDirectorySearch(db, query, page) {
-    const { resolution } = searchService.resolveQuery(query);
-    const isDirectoryQuery = ["code", "code_prefix", "actor"].includes(
+    const rawTag = parseRawTagQuery(query);
+    const { resolution: configuredResolution } = searchService.resolveQuery(query);
+    const resolution = rawTag
+      ? { type: "raw_tag", raw_tag: rawTag, display_name: rawTag }
+      : configuredResolution;
+    const isDirectoryQuery = ["code", "code_prefix", "actor", "tag", "raw_tag"].includes(
       resolution?.type,
     );
     const result = isDirectoryQuery
@@ -878,14 +869,13 @@ export function createTelegramService({
   }
 
   function renderSearchReply({ query, resolution, searchResult }) {
-    if (!["code", "code_prefix", "actor"].includes(resolution?.type)) {
-      return `未识别“${escapeHtml(query)}”。请输入番号前缀（如 ADN）或女优名。`;
+    if (!["code", "code_prefix", "actor", "tag", "raw_tag"].includes(resolution?.type)) {
+      return `未识别“${escapeHtml(query)}”。请输入番号前缀（如 ADN）或 #话题。`;
     }
     if (searchResult.total === 0) {
-      const subject =
-        resolution.type === "actor"
-          ? `#${resolution.display_name}`
-          : `#${resolution.code ?? resolution.prefix ?? query}`;
+      const subject = ["actor", "tag", "raw_tag"].includes(resolution.type)
+        ? `#${resolution.display_name ?? resolution.raw_tag ?? query.replace(/^#/u, "")}`
+        : `#${resolution.code ?? resolution.prefix ?? query}`;
       return `暂未收录 ${escapeHtml(subject)}。`;
     }
     const offset = (searchResult.page - 1) * searchResult.page_size;
@@ -943,12 +933,26 @@ export function createTelegramService({
     media.channel_chat_id,
     media.channel_message_id,
   );
-  const codeEntry = channelUrl
-    ? `<a href="${escapeHtml(channelUrl)}">${escapeHtml(code)}</a>`
-    : escapeHtml(code);
-  const actress = media.actors?.[0]?.display_name;
-  const entry = actress ? `${codeEntry}  #${escapeHtml(actress)}` : codeEntry;
-  return `${index} • ${entry}`;
+  const linkEntry = (label) =>
+    channelUrl
+      ? `<a href="${escapeHtml(channelUrl)}">${escapeHtml(label)}</a>`
+      : escapeHtml(label);
+  const rawTags = media.raw_tags?.length
+    ? media.raw_tags
+    : (media.tags ?? []).map((tag) => tag.display_name);
+  const tagEntries = [...new Set(rawTags)]
+    .filter(Boolean)
+    .map((tag) => linkEntry(`#${tag}`));
+  return `${index} • ${[linkEntry(code), ...tagEntries].join("  ")}`;
+}
+
+function parseRawTagQuery(query) {
+  const raw = typeof query === "string" ? query.trim() : "";
+  if (!raw.startsWith("#")) {
+    return null;
+  }
+  const tag = raw.replace(/^#+/u, "").trim();
+  return tag && !/\s/u.test(tag) ? tag : null;
 }
 
 function channelMessageUrl(chatId, messageId) {
@@ -1004,6 +1008,7 @@ function hashtag(displayName, prefix) {
           ? (resolution.actor_id ??
             resolution.tag_id ??
             resolution.category_id ??
+            resolution.raw_tag ??
             resolution.code ??
             resolution.prefix ??
             null)
@@ -1362,6 +1367,8 @@ function resolutionFilters(resolution) {
       return { tag_id: resolution.tag_id };
     case "category":
       return { category_id: resolution.category_id };
+    case "raw_tag":
+      return { raw_tag: resolution.raw_tag };
     default:
       return {};
   }

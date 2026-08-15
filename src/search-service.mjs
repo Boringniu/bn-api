@@ -193,11 +193,11 @@ export function createSearchService({
 
   async function loadAssociations(db, mediaIds) {
     if (mediaIds.length === 0) {
-      return { actors: new Map(), categories: new Map(), tags: new Map() };
+      return { actors: new Map(), categories: new Map(), tags: new Map(), rawTags: new Map() };
     }
 
     const placeholders = mediaIds.map(() => "?").join(", ");
-    const [actorRows, tagRows] = await db.batch([
+    const [actorRows, tagRows, rawTagRows] = await db.batch([
       db
         .prepare(
           `SELECT media_id, actor_id, display_name_snapshot, position
@@ -214,11 +214,24 @@ export function createSearchService({
            ORDER BY media_id, weight DESC, display_name_snapshot`,
         )
         .bind(...mediaIds),
+      db
+        .prepare(
+          `SELECT id AS media_id, raw_payload_json
+           FROM media
+           WHERE id IN (${placeholders})`,
+        )
+        .bind(...mediaIds),
     ]);
 
     const actors = groupBy(actorRows.results ?? [], "media_id");
     const tags = groupBy(tagRows.results ?? [], "media_id");
-    return { actors, tags };
+    const rawTags = new Map(
+      (rawTagRows.results ?? []).map((row) => [
+        row.media_id,
+        readRawTags(row.raw_payload_json),
+      ]),
+    );
+    return { actors, tags, rawTags };
   }
 
   function formatMedia(row, associations) {
@@ -244,6 +257,7 @@ export function createSearchService({
         tag_id: tag.tag_id,
         display_name: tag.display_name_snapshot,
       })),
+      raw_tags: associations.rawTags.get(row.id) ?? [],
       video_count: Number(row.video_count ?? 1),
       ...(row.channel_chat_id && row.channel_message_id
         ? {
@@ -530,6 +544,16 @@ function buildFilterSql(filters) {
     conditions.push("ft.tag_id = ? AND ft.search_enabled = 1");
     values.push(filters.tag_id);
   }
+  if (filters.raw_tag) {
+    conditions.push(
+      `EXISTS (
+         SELECT 1
+         FROM json_each(m.raw_payload_json, '$.raw_tags') AS raw_tag
+         WHERE raw_tag.value = ?
+       )`,
+    );
+    values.push(filters.raw_tag);
+  }
   if (filters.code) {
     conditions.push("m.normalized_code = ?");
     values.push(filters.code);
@@ -559,6 +583,20 @@ function clampPageSize(pageSize, search) {
 
 function emptyPage(page, pageSize) {
   return { page, page_size: pageSize, total: 0, results: [] };
+}
+
+function readRawTags(rawPayloadJson) {
+  if (typeof rawPayloadJson !== "string") {
+    return [];
+  }
+  try {
+    const rawTags = JSON.parse(rawPayloadJson)?.raw_tags;
+    return Array.isArray(rawTags)
+      ? [...new Set(rawTags.filter((tag) => typeof tag === "string" && tag.length > 0))]
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function groupBy(rows, key) {
