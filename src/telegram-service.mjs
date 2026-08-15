@@ -7,6 +7,7 @@ const TAGS_PER_LINE = 5;
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
+const PENDING_PRIVATE_FORWARD_CONTEXT_PREFIX = "private_forward_context:";
 const DEFAULT_MEDIA_GROUP_SETTLE_MS = 2_000;
 
 export function createTelegramService({
@@ -213,11 +214,26 @@ export function createTelegramService({
       }
       const origin = legacyForwardOrigin(message, env);
       const media = resolveTelegramMedia(message);
-      if (!origin || !media || !ingestService) {
+      if (!origin || !ingestService) {
         return { ignored: "private_forward_invalid" };
       }
+      const contextKey = privateForwardContextKey(message.chat.id, message.media_group_id);
+      if (!media) {
+        const caption = readPostText(message);
+        if (!caption || !contextKey) {
+          return { ignored: "private_forward_without_media" };
+        }
+        await writePrivateForwardContext(db, contextKey, {
+          caption,
+          message_ids: [message.message_id],
+        });
+        return { buffered: true, private_message_id: message.message_id };
+      }
 
-      const rawText = readPostText(message);
+      const privateContext = contextKey
+        ? await readPrivateForwardContext(db, contextKey)
+        : null;
+      const rawText = readPostText(message) || privateContext?.caption || "";
       const fileName = (media.file_name ?? "").replace(
         /\.(mp4|mkv|avi|wmv|ts)$/iu,
         "",
@@ -302,10 +318,18 @@ export function createTelegramService({
         )
         .run();
 
-      await this.callTelegram(env, "deleteMessage", {
-        chat_id: message.chat.id,
-        message_id: message.message_id,
-      });
+      const privateMessageIds = [
+        ...new Set([...(privateContext?.message_ids ?? []), message.message_id]),
+      ];
+      for (const privateMessageId of privateMessageIds) {
+        await this.callTelegram(env, "deleteMessage", {
+          chat_id: message.chat.id,
+          message_id: privateMessageId,
+        });
+      }
+      if (contextKey) {
+        await deletePrivateForwardContext(db, contextKey);
+      }
       const exists = result.outcome === "updated";
       await this.callTelegram(env, "sendMessage", {
         chat_id: message.chat.id,
@@ -1064,7 +1088,7 @@ function shouldStripForwardSource(post, env) {
 }
 
 function isLegacyChannelForward(message, env) {
-  return Boolean(resolveTelegramMedia(message) && legacyForwardOrigin(message, env));
+  return Boolean(legacyForwardOrigin(message, env));
 }
 
 function legacyForwardOrigin(message, env) {
@@ -1097,6 +1121,13 @@ function readPostText(post) {
 
 function pendingChannelContextKey(channelId) {
   return `${PENDING_CHANNEL_CONTEXT_PREFIX}${channelId}`;
+}
+
+function privateForwardContextKey(chatId, mediaGroupId) {
+  if (!chatId || !mediaGroupId) {
+    return null;
+  }
+  return `${PENDING_PRIVATE_FORWARD_CONTEXT_PREFIX}${chatId}:${mediaGroupId}`;
 }
 
 function pendingForwardGroupKey(channelId, mediaGroupId) {
@@ -1142,6 +1173,44 @@ function sortChannelPosts(posts) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function readPrivateForwardContext(db, key) {
+  const row = await db
+    .prepare("SELECT value FROM database_metadata WHERE key = ?")
+    .bind(key)
+    .first();
+  if (!row?.value) {
+    return null;
+  }
+  try {
+    const context = JSON.parse(row.value);
+    return typeof context.caption === "string" && Array.isArray(context.message_ids)
+      ? context
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writePrivateForwardContext(db, key, context) {
+  await db
+    .prepare(
+      `INSERT INTO database_metadata (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT (key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(key, JSON.stringify(context), new Date().toISOString())
+    .run();
+}
+
+async function deletePrivateForwardContext(db, key) {
+  await db
+    .prepare("DELETE FROM database_metadata WHERE key = ?")
+    .bind(key)
+    .run();
 }
 
 async function readPendingForwardGroup(db, key) {

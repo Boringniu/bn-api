@@ -570,6 +570,89 @@ test("admin private forward from the configured legacy channel is indexed then d
   );
 });
 
+test("private forwarded media group inherits caption tags and removes every private copy", async () => {
+  const telegramCalls = [];
+  const ingestCalls = [];
+  const context = {
+    caption: "ADN-002 #松下纱荣子",
+    message_ids: [60],
+  };
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_group_legacy", outcome: "created", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub({
+      resolution: {
+        type: "actor",
+        actor_id: "actor_matsushita",
+        display_name: "松下纱荣子",
+      },
+    }),
+    versionConfig,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: {} }) };
+    },
+  });
+  const env = {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_ADMIN_IDS: "222",
+    TELEGRAM_CHANNEL_ID: "-1004460339207",
+  };
+  const origin = {
+    type: "channel",
+    chat: { id: -1004460339207 },
+    message_id: 778,
+  };
+  const groupId = "private_album_1";
+
+  const buffered = await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        message_id: 60,
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        media_group_id: groupId,
+        caption: context.caption,
+        forward_origin: origin,
+      },
+    },
+    env,
+  );
+  const db = new FakeD1({ firstResults: [{ value: JSON.stringify(context) }] });
+  const completed = await service.handleUpdate(
+    db,
+    {
+      message: {
+        message_id: 61,
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        media_group_id: groupId,
+        video: { file_id: "GROUP", file_name: "clip.mp4" },
+        forward_origin: origin,
+      },
+    },
+    env,
+  );
+
+  assert.deepEqual(buffered, { buffered: true, private_message_id: 60 });
+  assert.equal(completed.source_channel_message_id, 778);
+  assert.equal(ingestCalls[0].code, "ADN-002");
+  assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
+  assert.deepEqual(ingestCalls[0].actors, ["松下纱荣子"]);
+  assert.deepEqual(
+    telegramCalls.map((call) => [call.method, call.body.message_id]),
+    [["deleteMessage", 60], ["deleteMessage", 61], ["sendMessage", undefined]],
+  );
+});
+
 test("legacy private forwarding rejects non-admins and other origins", async () => {
   const ingestCalls = [];
   const service = createTelegramService({
