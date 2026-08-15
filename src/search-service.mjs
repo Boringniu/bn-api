@@ -292,7 +292,8 @@ function resolveStep(step, query, { indexes, searchConfig }) {
           normalized,
           "category",
           "normalized",
-        )
+        ) ??
+        resolveUniquePartialActor(indexes.actorValues, normalized, searchConfig)
       );
     }
     case "prefix_match": {
@@ -345,6 +346,35 @@ function resolveEntity(valueIndex, value, type, match) {
     return null;
   }
   return { type, match, ...target };
+}
+
+function resolveUniquePartialActor(actorValues, normalized, searchConfig) {
+  const actorSearch = searchConfig.actor_search;
+  if (
+    !actorSearch?.enabled ||
+    !actorSearch.allow_partial_match ||
+    !isSpecificActorFragment(normalized)
+  ) {
+    return null;
+  }
+
+  const matches = new Map();
+  for (const [value, target] of actorValues) {
+    if (value.includes(normalized)) {
+      matches.set(target.actor_id, target);
+    }
+  }
+  if (matches.size !== 1) {
+    return null;
+  }
+  return { type: "actor", match: "unique_partial", ...matches.values().next().value };
+}
+
+function isSpecificActorFragment(value) {
+  if (/^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+$/u.test(value)) {
+    return [...value].length >= 2;
+  }
+  return /^[a-z0-9][a-z0-9 ]*$/u.test(value) && value.replaceAll(" ", "").length >= 3;
 }
 
 function findFuzzyMatch(valueIndex, normalized, maxDistance) {

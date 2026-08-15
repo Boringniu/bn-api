@@ -67,6 +67,22 @@ test("falls back to code prefix and fuzzy matching", () => {
   assert.equal(fuzzy.match, "fuzzy");
 });
 
+test("resolves unique partial fragments for less-common actresses without one-character overmatch", () => {
+  for (const [query, actorId] of [
+    ["白雪", "actor_000029"],
+    ["流川", "actor_000030"],
+    ["枫花", "actor_000031"],
+    ["楓花", "actor_000031"],
+    ["七海", "actor_000033"],
+  ]) {
+    const { resolution } = service.resolveQuery(query);
+    assert.equal(resolution?.type, "actor", query);
+    assert.equal(resolution?.match, "unique_partial", query);
+    assert.equal(resolution?.actor_id, actorId, query);
+  }
+  assert.equal(service.resolveQuery("藤").resolution, null);
+});
+
 test("returns null resolution for empty and unknown queries", () => {
   assert.equal(service.resolveQuery("").resolution, null);
   assert.equal(service.resolveQuery("完全不存在的词xyz").resolution, null);
