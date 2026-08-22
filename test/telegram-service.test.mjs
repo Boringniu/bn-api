@@ -1084,30 +1084,42 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   const service = createService({ fetchImpl });
   const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-100" };
 
-  const freshDb = new FakeD1({ firstResults: [null] });
+  const freshDb = new FakeD1({
+    firstResults: [null],
+    batchResults: [
+      [{ display_name: "希岛爱理" }],
+      [{ display_name: "剧情" }, { display_name: "中文字幕" }],
+    ],
+  });
   const pinned = await service.refreshPinnedIndex(freshDb, env);
   assert.equal(pinned.outcome, "pinned");
   assert.equal(pinned.pages, 1);
   assert.deepEqual(pinned.message_ids, [55]);
   assert.ok(telegramCalls.some((c) => c.url.includes("/pinChatMessage")));
   const sendCall = telegramCalls.find((c) => c.url.includes("/sendMessage"));
-  assert.equal(sendCall.body.text, "影视库索引");
-  assert.ok(!sendCall.body.text.includes("👤演员"));
-  assert.ok(!sendCall.body.text.includes("🏷话题"));
-  assert.ok(!sendCall.body.text.includes("#"));
+  assert.equal(
+    sendCall.body.text,
+    "影视库索引\n\n👤演员\n#希岛爱理\n\n🏷话题\n#剧情 #中文字幕",
+  );
   assert.ok(
     freshDb.statements.some((s) => s.sql.includes("INSERT INTO database_metadata")),
   );
 
   telegramCalls.length = 0;
-  const editDb = new FakeD1({ firstResults: [{ value: "[55]" }] });
+  const editDb = new FakeD1({
+    firstResults: [{ value: "[55]" }],
+    batchResults: [
+      [{ display_name: "希岛爱理" }],
+      [{ display_name: "剧情" }, { display_name: "中文字幕" }],
+    ],
+  });
   const edited = await service.refreshPinnedIndex(editDb, env);
   assert.equal(edited.outcome, "edited");
   assert.ok(telegramCalls[0].url.includes("/editMessageText"));
   assert.equal(telegramCalls[0].body.message_id, 55);
 });
 
-test("title-only index always remains a single pinned message", async () => {
+test("empty channel index falls back to a single title message", async () => {
   const telegramCalls = [];
   const service = createService({
     fetchImpl: async (url, init) => {
@@ -1115,7 +1127,7 @@ test("title-only index always remains a single pinned message", async () => {
       return { json: async () => ({ ok: true, result: { message_id: 101 } }) };
     },
   });
-  const db = new FakeD1({ firstResults: [null] });
+  const db = new FakeD1({ firstResults: [null], batchResults: [[], []] });
 
   const result = await service.refreshPinnedIndex(db, {
     TELEGRAM_BOT_TOKEN: "bot-token",

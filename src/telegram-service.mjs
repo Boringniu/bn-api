@@ -681,7 +681,30 @@ export function createTelegramService({
         throw new Error("TELEGRAM_CHANNEL_ID is not configured");
       }
 
-      const pages = this.renderIndexPages();
+      const [actorRows, tagRows] = await db.batch([
+        db.prepare(`
+          SELECT DISTINCT a.display_name_snapshot AS display_name
+          FROM media_actors a
+          JOIN channel_posts c ON c.media_id = a.media_id
+          JOIN media m ON m.id = a.media_id
+          WHERE m.status = 'approved' AND a.display_enabled = 1
+          ORDER BY a.display_name_snapshot
+        `),
+        db.prepare(`
+          SELECT DISTINCT topic.value AS display_name
+          FROM media m
+          JOIN channel_posts c ON c.media_id = m.id
+          JOIN json_each(m.raw_payload_json, '$.raw_tags') AS topic
+          WHERE m.status = 'approved'
+            AND typeof(topic.value) = 'text'
+            AND trim(topic.value) <> ''
+          ORDER BY display_name
+        `),
+      ]);
+      const pages = this.renderIndexPages({
+        actors: actorRows.results ?? [],
+        tags: tagRows.results ?? [],
+      });
 
       const stored = await readIndexMessageIds(db);
       const messageIds = [];
@@ -756,8 +779,46 @@ export function createTelegramService({
       };
     },
 
-    renderIndexPages() {
-      return [channelIndex.title];
+    renderIndexPages({ actors = [], tags = [] } = {}) {
+      const actorTags = actors
+        .map((row) => hashtag(row.display_name, channelIndex.actor_prefix))
+        .filter(Boolean);
+      const typeTags = tags
+        .map((row) => hashtag(row.display_name, channelIndex.tag_prefix))
+        .filter(Boolean);
+      const blocks = [];
+      if (channelIndex.show_actors && (actorTags.length > 0 || !channelIndex.hide_empty_actor_block)) {
+        blocks.push({ label: channelIndex.actors_label, lines: chunkTags(actorTags) });
+      }
+      if (channelIndex.show_tags && (typeTags.length > 0 || !channelIndex.hide_empty_tag_block)) {
+        blocks.push({ label: channelIndex.tags_label, lines: chunkTags(typeTags) });
+      }
+      if (blocks.length === 0) {
+        return [channelIndex.title];
+      }
+
+      const pages = [];
+      let current = channelIndex.title;
+      const pushPage = () => {
+        pages.push(current.trim());
+        current = `${channelIndex.title}（续）`;
+      };
+      for (const block of blocks) {
+        const blockHeader = `\n\n${block.label}`;
+        if (current.length + blockHeader.length > PAGE_CHAR_LIMIT) {
+          pushPage();
+        }
+        current += blockHeader;
+        for (const line of block.lines) {
+          if (current.length + line.length + 1 > PAGE_CHAR_LIMIT) {
+            pushPage();
+            current += `\n\n${block.label}（续）`;
+          }
+          current += `\n${line}`;
+        }
+      }
+      pushPage();
+      return pages;
     },
 
     async callTelegram(env, method, payload) {
