@@ -1087,8 +1087,12 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   const freshDb = new FakeD1({
     firstResults: [null],
     batchResults: [
-      [{ display_name: "希岛爱理" }],
-      [{ display_name: "剧情" }, { display_name: "中文字幕" }],
+      [{ display_name: "希岛爱理" }, { display_name: "希岛爱理" }],
+      [
+        { display_name: "剧情", weight: 80 },
+        { display_name: "中文字幕", weight: 70 },
+        { display_name: "剧情", weight: 80 },
+      ],
     ],
   });
   const pinned = await service.refreshPinnedIndex(freshDb, env);
@@ -1099,7 +1103,11 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   const sendCall = telegramCalls.find((c) => c.url.includes("/sendMessage"));
   assert.equal(
     sendCall.body.text,
-    "影视库索引\n\n👤演员\n#希岛爱理\n\n🏷话题\n#剧情 #中文字幕",
+    "影视库索引\n演员 1 位 · 话题 2 项\n\n👤演员 · 1\n#希岛爱理\n\n🏷话题 · 2\n#剧情 #中文字幕",
+  );
+  assert.ok(
+    freshDb.statements.some((s) => s.sql.includes("FROM media_tags")),
+    "index tags must come from standardized media_tags rather than raw topics",
   );
   assert.ok(
     freshDb.statements.some((s) => s.sql.includes("INSERT INTO database_metadata")),
@@ -1109,14 +1117,36 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
   const editDb = new FakeD1({
     firstResults: [{ value: "[55]" }],
     batchResults: [
-      [{ display_name: "希岛爱理" }],
-      [{ display_name: "剧情" }, { display_name: "中文字幕" }],
+      [{ display_name: "希岛爱理" }, { display_name: "希岛爱理" }],
+      [
+        { display_name: "剧情", weight: 80 },
+        { display_name: "中文字幕", weight: 70 },
+        { display_name: "剧情", weight: 80 },
+      ],
     ],
   });
   const edited = await service.refreshPinnedIndex(editDb, env);
   assert.equal(edited.outcome, "edited");
   assert.ok(telegramCalls[0].url.includes("/editMessageText"));
   assert.equal(telegramCalls[0].body.message_id, 55);
+});
+
+test("channel index deduplicates tags and groups long sections", () => {
+  const service = createService();
+  const tags = Array.from({ length: 25 }, (_, index) => ({
+    display_name: `话题${index + 1}`,
+  }));
+  const pages = service.renderIndexPages({
+    actors: [{ display_name: "希岛爱理" }, { display_name: "希岛爱理" }],
+    tags: [...tags, { display_name: "话题1" }],
+  });
+
+  assert.equal(pages.length, 1);
+  assert.match(pages[0], /演员 1 位 · 话题 25 项/);
+  assert.match(pages[0], /👤演员 · 1/);
+  assert.match(pages[0], /🏷话题 · 25（1\/2）/);
+  assert.match(pages[0], /🏷话题 · 25（2\/2）/);
+  assert.equal((pages[0].match(/#话题1(?:\s|$)/gu) ?? []).length, 1);
 });
 
 test("empty channel index falls back to a single title message", async () => {

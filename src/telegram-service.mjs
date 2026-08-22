@@ -4,6 +4,7 @@ const TELEGRAM_API = "https://api.telegram.org";
 // Telegram hard limit is 4096 chars per message; leave headroom.
 const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
+const INDEX_ITEMS_PER_BLOCK = 24;
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
@@ -691,14 +692,13 @@ export function createTelegramService({
           ORDER BY a.display_name_snapshot
         `),
         db.prepare(`
-          SELECT DISTINCT topic.value AS display_name
-          FROM media m
-          JOIN channel_posts c ON c.media_id = m.id
-          JOIN json_each(m.raw_payload_json, '$.raw_tags') AS topic
-          WHERE m.status = 'approved'
-            AND typeof(topic.value) = 'text'
-            AND trim(topic.value) <> ''
-          ORDER BY display_name
+          SELECT t.display_name_snapshot AS display_name, MAX(t.weight) AS weight
+          FROM media_tags t
+          JOIN channel_posts c ON c.media_id = t.media_id
+          JOIN media m ON m.id = t.media_id
+          WHERE m.status = 'approved' AND t.display_enabled = 1
+          GROUP BY t.display_name_snapshot
+          ORDER BY weight DESC, t.display_name_snapshot
         `),
       ]);
       const pages = this.renderIndexPages({
@@ -780,19 +780,20 @@ export function createTelegramService({
     },
 
     renderIndexPages({ actors = [], tags = [] } = {}) {
-      const actorTags = actors
-        .map((row) => hashtag(row.display_name, channelIndex.actor_prefix))
-        .filter(Boolean);
-      const typeTags = tags
-        .map((row) => hashtag(row.display_name, channelIndex.tag_prefix))
-        .filter(Boolean);
-      const blocks = [];
-      if (channelIndex.show_actors && (actorTags.length > 0 || !channelIndex.hide_empty_actor_block)) {
-        blocks.push({ label: channelIndex.actors_label, lines: chunkTags(actorTags) });
-      }
-      if (channelIndex.show_tags && (typeTags.length > 0 || !channelIndex.hide_empty_tag_block)) {
-        blocks.push({ label: channelIndex.tags_label, lines: chunkTags(typeTags) });
-      }
+      const actorTags = uniqueHashtags(
+        actors.map((row) => hashtag(row.display_name, channelIndex.actor_prefix)),
+      );
+      const typeTags = uniqueHashtags(
+        tags.map((row) => hashtag(row.display_name, channelIndex.tag_prefix)),
+      );
+      const blocks = [
+        ...(channelIndex.show_actors
+          ? buildIndexBlocks(channelIndex.actors_label, actorTags)
+          : []),
+        ...(channelIndex.show_tags
+          ? buildIndexBlocks(channelIndex.tags_label, typeTags)
+          : []),
+      ];
       if (blocks.length === 0) {
         return [channelIndex.title];
       }
@@ -818,7 +819,21 @@ export function createTelegramService({
         }
       }
       pushPage();
-      return pages;
+
+      const summary = [
+        actorTags.length > 0 ? `演员 ${actorTags.length} 位` : null,
+        typeTags.length > 0 ? `话题 ${typeTags.length} 项` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return pages.map((page, index) => {
+        const oldHeader = index === 0 ? channelIndex.title : `${channelIndex.title}（续）`;
+        const pageTitle = pages.length > 1
+          ? `${channelIndex.title} · ${index + 1}/${pages.length}`
+          : channelIndex.title;
+        const header = index === 0 && summary ? `${pageTitle}\n${summary}` : pageTitle;
+        return `${header}${page.slice(oldHeader.length)}`;
+      });
     },
 
     async callTelegram(env, method, payload) {
@@ -1213,6 +1228,27 @@ function chunkTags(tags) {
     lines.push(tags.slice(i, i + TAGS_PER_LINE).join(" "));
   }
   return lines;
+}
+
+function uniqueHashtags(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function buildIndexBlocks(label, tags) {
+  if (tags.length === 0) {
+    return [];
+  }
+  const totalBlocks = Math.ceil(tags.length / INDEX_ITEMS_PER_BLOCK);
+  const blocks = [];
+  for (let offset = 0; offset < tags.length; offset += INDEX_ITEMS_PER_BLOCK) {
+    const blockIndex = Math.floor(offset / INDEX_ITEMS_PER_BLOCK);
+    const suffix = totalBlocks > 1 ? `（${blockIndex + 1}/${totalBlocks}）` : "";
+    blocks.push({
+      label: `${label} · ${tags.length}${suffix}`,
+      lines: chunkTags(tags.slice(offset, offset + INDEX_ITEMS_PER_BLOCK)),
+    });
+  }
+  return blocks;
 }
 
 function resolveTelegramMedia(post) {
