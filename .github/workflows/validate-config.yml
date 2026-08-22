@@ -27,8 +27,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Core validation
-        run: npm run validate && npm run check:aliases && npm test
-
-      - name: Build check
-        run: npm run build:manifest && npm run build:worker
+      - name: Complete validation
+        run: npm run check

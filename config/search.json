@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-07-18T00:00:00Z",
-  "updated_by": "admin",
+  "updated_at": "2026-08-23T00:00:00Z",
+  "updated_by": "automation",
   "items": [],
   "search": {
     "default_page_size": 10,
@@ -93,8 +93,6 @@
   },
   "access_control": {
     "public_search_approved_only": true,
-    "allow_pending_for_admin": true,
-    "allow_raw_metadata_for_admin": true,
     "allow_source_link_for_authorized_users_only": true
   }
 }

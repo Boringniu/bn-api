@@ -1,61 +1,49 @@
-# 审核指南（REVIEW_GUIDE）
+# 审核指南
 
-本文档面向负责规则审核的管理员，说明审核队列的来源、审核动作和处理结果。规则定义见 `config/review_rules.json`。
+本文档面向负责规则审核的管理员，说明当前 Worker 会写入 D1 的审核项、可执行操作和规则落地边界。审核类型定义见 `config/review_rules.json`。
 
-## 审核项来源
+## 当前审核项来源
 
-Worker 在入库时遇到以下情况会写入 D1 的审核队列（`review_items`）：
+Worker 不会因为未知标签而生成审核项。标签路径会把未知或并列匹配的原始标签保留为自由话题；它们不会自动写入标签词典。当前实际会在入库路径生成的审核项如下：
 
 | 类型 | 触发条件 | 审核角色 |
 | --- | --- | --- |
-| `pending_tag` | 原始标签不在标签字典 | editor |
-| `pending_actor` | 演员名称不在演员字典 | editor |
-| `pending_alias` | 检测到疑似别名候选 | editor |
-| `pending_category` | 无法归入固定一级分类 | admin |
-| `possible_duplicate` | 疑似重复视频或同番号多版本 | editor |
-| `possible_code` | 疑似番号但无法确认格式 | editor |
+| `pending_actor` | 演员名称不在已批准演员词典或其别名中 | editor |
+| `pending_alias` | 一个演员输入匹配到多个不同的已批准演员 | editor |
+| `possible_code` | 输入看起来像编号但不符合当前编号规范 | editor |
+| `rule_violation` | 演员或标签数量超过配置上限 | editor |
 
-AI 只能在审核项上附加建议（`allow_ai_suggestion: true`），一律不得自动批准（`allow_auto_approve: false`）。
+`pending_tag`、`pending_category` 和 `possible_duplicate` 仍可作为配置中的兼容审核类型存在，但当前标签归一化器不会因未知标签或分类不确定性创建它们。当前运行时也不自动选定一级分类。
+
+AI 可以在允许的审核项上提供建议（`allow_ai_suggestion: true`），但不能自动批准；所有已启用审核类型的 `allow_auto_approve` 均为 `false`。
 
 ## 审核动作
 
-| 动作 | 结果 |
+| 动作 | 记录结果 |
 | --- | --- |
-| `approve` | 写入对应字典，状态为 `approved` |
-| `reject` | 保留审核记录，标记为 `rejected` |
-| `ignore` | 写入 `ignored.json` 或标记为忽略 |
-| `merge` | 合并至既有标签、演员或别名 |
-| `deprecate` | 旧规则保留，但不再用于新数据 |
-| `edit` | 管理员修改后再提交 |
-| `link_existing` | 将待审核项关联至已有标准对象 |
+| `approve` | 审核项标记为 `approved`，必要时生成配置变更建议 |
+| `reject` | 审核项保留并标记为 `rejected` |
+| `ignore` | 审核项标记为 `ignored`，可作为后续维护忽略规则的依据 |
+| `merge` | 审核项标记为 `merged`，必须指定既有目标对象 |
+| `deprecate` | 审核项标记为 `approved`，建议弃用旧规则 |
+| `edit` | 审核项标记为 `approved`，保存人工修订值 |
+| `link_existing` | 审核项标记为 `merged`，必须关联既有目标对象 |
+
+审核接口只会把操作、审核人角色、备注、目标和 `config_proposal` 写入 D1。它不会直接修改 `config/`、创建 Git 提交或部署 Worker。
 
 ## 批准后的落地流程
 
-管理员只编辑根目录 `review-decisions.json`：
+1. 管理员在审核队列中确认演员、别名或编号规则的处理方式。
+2. 系统生成的 `config_proposal` 指明建议修改的配置文件和变更方向；它只是交接信息，不是自动写入。
+3. 管理员在 Git 分支中修改对应 JSON、Schema 和文档；若改动 `config/`，同时提升 `config/version.json` 的仓库发布版本。
+4. 运行 `npm run check`，再提交 Pull Request。
+5. CI 通过后合并；后续目录重新索引和频道索引刷新由受保护的运维入口执行。
 
-```json
-[
-  ["新话题", "1"],
-  ["同义词", "1", "标准话题"],
-  ["应忽略词", "2"]
-]
-```
-
-`1` 表示通过，`2` 表示否定；第三列只用于明确同义词目标。提交到
-`main` 后，GitHub Actions 自动：
-
-1. 从生产审核队列确认 `#话题` 应放在演员位、分类位还是题材位。
-2. 修改对应配置并自动提升补丁版本。
-3. 运行全套配置校验和测试。
-4. 提交生成后的配置并部署 Worker。
-5. 分批重新标准化旧数据，最后刷新频道置顶索引。
-
-任何歧义、缺失审核项或校验错误都会中止流程，不会直接修改生产环境。
+任何歧义、缺失审核项或校验错误都会中止规则变更，不会直接修改生产规则。
 
 ## 审核注意事项
 
 - 演员：不确定的名称保留原文，不得凭空翻译；中文简体标准名必须人工确认后才能进入 `approved`。
-- 标签：先判断是否应归并为既有标签的别名（例如 `OL` 归入 `办公室`），而不是新建标签；元数据类信息（清晰度、格式）进入 `ignored.json`。
-- 分类位：日本、欧美、国产、自拍、AI短剧在 Telegram 中同样是 `#话题`，
-  这里只定义它们在置顶索引中的排列位置。
+- 标签：未知标签会作为自由话题保留。如需将其升格为标准标签、并入既有别名或加入忽略词，应通过 Git Pull Request 修改规则，而不是依赖审核 API 自动写入。
+- 分类：日本、欧美、国产、自拍、AI短剧作为固定词典项保留；当前标签路径不自动给新记录归类。
 - Alias：`contains` 和 `regex` 必须写明 `notes`；`regex` 必须附带 `test_cases`，CI 会实际执行。

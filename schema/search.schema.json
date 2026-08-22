@@ -245,19 +245,11 @@
       "additionalProperties": false,
       "required": [
         "public_search_approved_only",
-        "allow_pending_for_admin",
-        "allow_raw_metadata_for_admin",
         "allow_source_link_for_authorized_users_only"
       ],
       "properties": {
         "public_search_approved_only": {
           "const": true
-        },
-        "allow_pending_for_admin": {
-          "type": "boolean"
-        },
-        "allow_raw_metadata_for_admin": {
-          "type": "boolean"
         },
         "allow_source_link_for_authorized_users_only": {
           "const": true
