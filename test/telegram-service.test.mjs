@@ -1106,8 +1106,10 @@ test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
     "影视库索引\n演员 1 位 · 话题 2 项\n\n👤演员 · 1\n#希岛爱理\n\n🏷话题 · 2\n#剧情 #中文字幕",
   );
   assert.ok(
-    freshDb.statements.some((s) => s.sql.includes("FROM media_tags")),
-    "index tags must come from standardized media_tags rather than raw topics",
+    freshDb.statements.some(
+      (s) => s.sql.includes("FROM media_tags") && s.sql.includes("tag_id NOT LIKE 'tag_topic_%'"),
+    ),
+    "index tags must exclude free raw topics and use standardized media_tags",
   );
   assert.ok(
     freshDb.statements.some((s) => s.sql.includes("INSERT INTO database_metadata")),
@@ -1147,6 +1149,32 @@ test("channel index deduplicates tags and groups long sections", () => {
   assert.match(pages[0], /🏷话题 · 25（1\/2）/);
   assert.match(pages[0], /🏷话题 · 25（2\/2）/);
   assert.equal((pages[0].match(/#话题1(?:\s|$)/gu) ?? []).length, 1);
+});
+
+test("channel index excludes actor aliases, categories, and duplicate standard tags", () => {
+  const service = createService({
+    searchService: createSearchStub({
+      resolutions: {
+        "七海ティナ": { type: "actor", display_name: "七海蒂娜" },
+        "日本": { type: "category", display_name: "日本" },
+      },
+    }),
+  });
+  const [page] = service.renderIndexPages({
+    actors: [{ display_name: "七海蒂娜" }],
+    tags: [
+      { display_name: "七海蒂娜" },
+      { display_name: "七海ティナ" },
+      { display_name: "日本" },
+      { display_name: "剧情" },
+      { display_name: "剧情" },
+    ],
+  });
+
+  assert.match(page, /👤演员 · 1\n#七海蒂娜/);
+  assert.match(page, /🏷话题 · 1\n#剧情/);
+  assert.ok(!page.includes("#七海ティナ"));
+  assert.ok(!page.includes("#日本"));
 });
 
 test("empty channel index falls back to a single title message", async () => {
@@ -1594,11 +1622,16 @@ test("preserves an actor-name hashtag as a topic and actress association", async
   assert.deepEqual(ingestCalls[0].actors, ["松下纱荣子"]);
 });
 
-function createSearchStub({ resolution = null, media = [], rawTagMedia = [] } = {}) {
+function createSearchStub({
+  resolution = null,
+  resolutions = {},
+  media = [],
+  rawTagMedia = [],
+} = {}) {
   return {
     findCalls: [],
     resolveQuery(query) {
-      return { query, resolution };
+      return { query, resolution: resolutions[query] ?? resolution };
     },
     async findMedia(db, options) {
       this.findCalls.push(options);

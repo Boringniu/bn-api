@@ -696,7 +696,9 @@ export function createTelegramService({
           FROM media_tags t
           JOIN channel_posts c ON c.media_id = t.media_id
           JOIN media m ON m.id = t.media_id
-          WHERE m.status = 'approved' AND t.display_enabled = 1
+          WHERE m.status = 'approved'
+            AND t.display_enabled = 1
+            AND t.tag_id NOT LIKE 'tag_topic_%'
           GROUP BY t.display_name_snapshot
           ORDER BY weight DESC, t.display_name_snapshot
         `),
@@ -780,11 +782,18 @@ export function createTelegramService({
     },
 
     renderIndexPages({ actors = [], tags = [] } = {}) {
+      const actorNames = actors
+        .map((row) => row.display_name)
+        .filter(Boolean);
+      const actorValues = new Set(actorNames.map(normalizeValue));
       const actorTags = uniqueHashtags(
-        actors.map((row) => hashtag(row.display_name, channelIndex.actor_prefix)),
+        actorNames.map((name) => hashtag(name, channelIndex.actor_prefix)),
       );
       const typeTags = uniqueHashtags(
-        tags.map((row) => hashtag(row.display_name, channelIndex.tag_prefix)),
+        tags
+          .map((row) => row.display_name)
+          .filter((name) => isIndexTopic(name, actorValues, searchService))
+          .map((name) => hashtag(name, channelIndex.tag_prefix)),
       );
       const blocks = [
         ...(channelIndex.show_actors
@@ -1231,7 +1240,30 @@ function chunkTags(tags) {
 }
 
 function uniqueHashtags(values) {
-  return [...new Set(values.filter(Boolean))];
+  const seen = new Set();
+  return values.filter((value) => {
+    if (!value) {
+      return false;
+    }
+    const normalized = normalizeValue(value.replace(/^#/u, ""));
+    if (!normalized || seen.has(normalized)) {
+      return false;
+    }
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function isIndexTopic(value, actorValues, searchService) {
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+  const normalized = normalizeValue(value);
+  if (!normalized || actorValues.has(normalized)) {
+    return false;
+  }
+  const { resolution } = searchService.resolveQuery(value);
+  return !["actor", "category"].includes(resolution?.type);
 }
 
 function buildIndexBlocks(label, tags) {
