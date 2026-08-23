@@ -184,9 +184,9 @@ export function createTelegramService({
           "/stats - 查看收录统计\n" +
           "/index - 浏览频道索引\n" +
           "/duplicates - 查看重复候选（管理员）\n" +
-          "/delete <媒体ID> CONFIRM - 删除重复候选（管理员）\n" +
+          "/delete - 打开删除候选（管理员）\n" +
           "/refresh - 刷新频道索引（管理员）";
-      } else if (text === "/duplicates") {
+      } else if (text === "/duplicates" || command === "/delete") {
         if (!isUserAdmin) {
           reply = "权限不足";
         } else {
@@ -195,21 +195,6 @@ export function createTelegramService({
             currentChannelId: env.TELEGRAM_CHANNEL_ID,
           });
           replyMarkup = buildDuplicateCandidateMarkup(candidates);
-        }
-      } else if (command === "/delete") {
-        if (!isUserAdmin) {
-          reply = "权限不足";
-        } else {
-          const deletion = parseDuplicateDeletionCommand(text);
-          if (!deletion) {
-            reply = "用法：/delete <媒体ID> CONFIRM\n仅能删除 /duplicates 中列出的重复候选；未执行此命令的记录会默认保留。";
-          } else {
-            const result = await this.deleteDuplicateCandidate(db, env, {
-              mediaId: deletion.mediaId,
-              deletedByUserId: userId,
-            });
-            reply = formatDuplicateDeletionResult(result);
-          }
         }
       } else if (text === "/refresh") {
         if (!isUserAdmin) {
@@ -1508,7 +1493,6 @@ function formatDuplicateCandidates(groups, { currentChannelId = "" } = {}) {
           ? " · <i>旧频道遗留：仅删除目录</i>"
           : " · <i>当前频道：删除消息与目录</i>";
       lines.push(`• ${heading}${title}${legacyNotice}`);
-      lines.push(`<code>/delete ${escapeHtml(row.media_id)} CONFIRM</code>`);
     }
   }
   return lines.join("\n");
@@ -1523,9 +1507,14 @@ function buildDuplicateCandidateMarkup(groups) {
         continue;
       }
       const code = candidate.normalized_code
-        ? `删除 #${candidate.normalized_code}`
-        : "删除此候选";
-      rows.push([{ text: code, callback_data: callbackData }]);
+        ? `#${candidate.normalized_code}`
+        : "未标号候选";
+      const title = String(candidate.title ?? "").trim();
+      const label = title ? `删除 ${code} · ${title}` : `删除 ${code}`;
+      rows.push([{
+        text: label.length > 60 ? `${label.slice(0, 59)}…` : label,
+        callback_data: callbackData,
+      }]);
     }
   }
   return rows.length > 0 ? { inline_keyboard: rows } : null;
@@ -1564,11 +1553,6 @@ function formatDuplicateDeletionConfirmation(candidate, env) {
     ? "将只删除旧频道遗留的目录记录；不会操作已注销旧频道的原消息。"
     : "将删除当前频道消息及其目录记录。";
   return `<b>确认删除 ${code}${title}？</b>\n${scope}\n\n点击“确认删除此条”后才会执行。`;
-}
-
-function parseDuplicateDeletionCommand(text) {
-  const match = /^\/delete\s+(media_[a-f0-9]{32})\s+confirm$/iu.exec(text.trim());
-  return match ? { mediaId: match[1].toLowerCase() } : null;
 }
 
 function formatDuplicateDeletionResult(result) {

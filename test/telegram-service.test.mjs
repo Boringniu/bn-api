@@ -554,11 +554,11 @@ test("duplicates command is admin-only and only renders review candidates", asyn
   assert.ok(calls[1].body.text.includes("候选标题 A"));
   assert.ok(calls[1].body.text.includes("当前频道：删除消息与目录"));
   assert.ok(calls[1].body.text.includes("旧频道遗留：仅删除目录"));
-  assert.ok(calls[1].body.text.includes("/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRM"));
+  assert.ok(!calls[1].body.text.includes("media_"));
   assert.deepEqual(calls[1].body.reply_markup, {
     inline_keyboard: [
-      [{ text: "删除 #ADN-100", callback_data: "dupdel:d:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
-      [{ text: "删除 #ADN-100", callback_data: "dupdel:d:media_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }],
+      [{ text: "删除 #ADN-100 · 候选标题 A", callback_data: "dupdel:d:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+      [{ text: "删除 #ADN-100 · 候选标题 B", callback_data: "dupdel:d:media_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }],
     ],
   });
   assert.equal(
@@ -567,7 +567,45 @@ test("duplicates command is admin-only and only renders review candidates", asyn
   );
 });
 
-test("delete command requires explicit confirmation and preserves records when Telegram deletion fails", async () => {
+test("delete command opens an ID-free duplicate candidate list", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+  const db = new FakeD1({
+    allResults: [[{
+      media_id: "media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      tg_file_unique_id: "same-file",
+      normalized_code: "ADN-100",
+      title: "候选标题",
+      tg_chat_id: "-1004460339207",
+      tg_message_id: 17,
+    }]],
+  });
+  await service.handleUpdate(
+    db,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete" } },
+    {
+      TELEGRAM_BOT_TOKEN: "bot-token",
+      TELEGRAM_ADMIN_IDS: "2002",
+      TELEGRAM_CHANNEL_ID: "-1004460339207",
+    },
+  );
+  assert.ok(calls[0].body.text.includes("重复候选"));
+  assert.ok(!calls[0].body.text.includes("media_"));
+  assert.deepEqual(calls[0].body.reply_markup, {
+    inline_keyboard: [[{
+      text: "删除 #ADN-100 · 候选标题",
+      callback_data: "dupdel:d:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    }]],
+  });
+  assert.ok(!db.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
+});
+
+test("duplicate deletion routine preserves records when Telegram deletion fails", async () => {
   const calls = [];
   const candidate = {
     media_id: "media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -581,67 +619,49 @@ test("delete command requires explicit confirmation and preserves records when T
   const service = createService({
     fetchImpl: async (url, init) => {
       const method = url.split("/").at(-1);
-      const body = JSON.parse(init.body);
-      calls.push({ method, body });
-      const response = method === "deleteMessage"
-        ? { ok: true, result: true }
-        : { ok: true, result: { message_id: 1 } };
-      return { json: async () => response };
+      calls.push({ method, body: JSON.parse(init.body) });
+      return {
+        json: async () => method === "deleteMessage"
+          ? { ok: true, result: true }
+          : { ok: true, result: { message_id: 1 } },
+      };
     },
   });
-  const env = {
-    TELEGRAM_BOT_TOKEN: "bot-token",
-    TELEGRAM_ADMIN_IDS: "2002",
-    TELEGRAM_CHANNEL_ID: "-1004460339207",
-  };
-
-  await service.handleUpdate(
-    new FakeD1(),
-    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
-    env,
-  );
-  assert.ok(calls[0].body.text.includes("CONFIRM"));
+  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-1004460339207" };
 
   const deleteDb = new FakeD1({ firstResults: [candidate] });
-  await service.handleUpdate(
-    deleteDb,
-    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRM" } },
-    env,
-  );
-  assert.equal(calls.at(-2).method, "deleteMessage");
-  assert.deepEqual(calls.at(-2).body, { chat_id: "-1004460339207", message_id: 17 });
-  assert.ok(calls.at(-1).body.text.includes("已删除 #ADN-100"));
+  const completed = await service.deleteDuplicateCandidate(deleteDb, env, {
+    mediaId: candidate.media_id,
+    deletedByUserId: "2002",
+  });
+  assert.equal(completed.outcome, "completed");
+  assert.deepEqual(calls.at(-1), {
+    method: "deleteMessage",
+    body: { chat_id: "-1004460339207", message_id: 17 },
+  });
   assert.ok(deleteDb.statements.some((statement) => statement.sql.includes("INSERT INTO duplicate_deletion_audit")));
   assert.ok(deleteDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
 
-  const failedCalls = [];
   const failingService = createService({
-    fetchImpl: async (url, init) => {
-      const method = url.split("/").at(-1);
-      failedCalls.push({ method, body: JSON.parse(init.body) });
-      const response = method === "deleteMessage"
+    fetchImpl: async (url) => ({
+      json: async () => url.endsWith("/deleteMessage")
         ? { ok: false, description: "message can't be deleted" }
-        : { ok: true, result: { message_id: 1 } };
-      return { json: async () => response };
-    },
+        : { ok: true, result: { message_id: 1 } },
+    }),
   });
   const failedDb = new FakeD1({ firstResults: [candidate] });
-  await failingService.handleUpdate(
-    failedDb,
-    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRM" } },
-    env,
-  );
-  assert.ok(failedCalls.at(-1).body.text.includes("索引记录已保留"));
+  const failed = await failingService.deleteDuplicateCandidate(failedDb, env, {
+    mediaId: candidate.media_id,
+    deletedByUserId: "2002",
+  });
+  assert.equal(failed.outcome, "telegram_delete_failed");
   assert.ok(failedDb.statements.some((statement) => statement.sql.includes("telegram_delete_failed")));
   assert.ok(!failedDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
 
   const legacyCalls = [];
   const legacyService = createService({
     fetchImpl: async (url, init) => {
-      legacyCalls.push({
-        method: url.split("/").at(-1),
-        body: JSON.parse(init.body),
-      });
+      legacyCalls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
       return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
     },
   });
@@ -652,13 +672,12 @@ test("delete command requires explicit confirmation and preserves records when T
     tg_message_id: 99,
   };
   const legacyDb = new FakeD1({ firstResults: [legacyCandidate] });
-  await legacyService.handleUpdate(
-    legacyDb,
-    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete media_cccccccccccccccccccccccccccccccc CONFIRM" } },
-    env,
-  );
+  const legacy = await legacyService.deleteDuplicateCandidate(legacyDb, env, {
+    mediaId: legacyCandidate.media_id,
+    deletedByUserId: "2002",
+  });
+  assert.equal(legacy.outcome, "legacy_catalog_only_completed");
   assert.ok(!legacyCalls.some((call) => call.method === "deleteMessage"));
-  assert.ok(legacyCalls.at(-1).body.text.includes("旧频道遗留目录记录"));
   assert.ok(legacyDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
   assert.ok(legacyDb.statements.some((statement) => statement.sql.includes("legacy_catalog_only")));
 });
