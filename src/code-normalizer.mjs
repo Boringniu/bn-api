@@ -28,6 +28,15 @@ export function normalizeCode(rawCode, searchConfig) {
     candidate = candidate.replace(/_/gu, "");
   }
 
+  const fc2Match = /^FC2(?:-PPV)?-?(\d{2,8})$/u.exec(candidate);
+  if (fc2Match) {
+    return {
+      raw_code: rawCode,
+      normalized_code: `FC2-${fc2Match[1]}`,
+      is_valid: true,
+    };
+  }
+
   const match = new RegExp(rules.pattern, "u").exec(candidate);
   if (!match) {
     return {

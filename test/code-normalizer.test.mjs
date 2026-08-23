@@ -15,6 +15,16 @@ test("normalizes configured media codes", () => {
     normalized_code: "SSIS-001",
     is_valid: true,
   });
+  assert.deepEqual(normalizeCode("FC2-PPV-3206621", searchConfig), {
+    raw_code: "FC2-PPV-3206621",
+    normalized_code: "FC2-3206621",
+    is_valid: true,
+  });
+  assert.deepEqual(normalizeCode("fc2_1297737", searchConfig), {
+    raw_code: "fc2_1297737",
+    normalized_code: "FC2-1297737",
+    is_valid: true,
+  });
 });
 
 test("retains invalid code candidates for review", () => {
