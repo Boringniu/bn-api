@@ -2029,7 +2029,9 @@ export function createTelegramService({
   }
 
   function formatStoryList() {
-    return "📚 <b>系列剧情</b>";
+    // Telegram 的内联按钮必须附着在一条非空消息上；使用不可见分隔符，
+    // 使目录界面只呈现下方剧情按钮而不显示额外标题或正文。
+    return "\u2063";
   }
 
   function formatStoryCreated({ story, created }) {
@@ -2098,7 +2100,7 @@ export function createTelegramService({
       if (!callbackData) {
         return [];
       }
-      const label = `${story.title}【${story.video_count}】`;
+      const label = `【${story.video_count}】 ${story.title}`;
       return [[{ text: label.length > 60 ? `${label.slice(0, 59)}…` : label, callback_data: callbackData }]];
     });
     const pagination = [];

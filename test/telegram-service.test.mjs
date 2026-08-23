@@ -1080,12 +1080,12 @@ test("series stories list top-level entries and reuse standard clickable search 
     message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/stories" },
   }, { TELEGRAM_BOT_TOKEN: "bot-token" });
 
-  assert.equal(calls[0].body.text, "📚 <b>系列剧情</b>");
-  assert.ok(!calls[0].body.text.includes("点击条目"));
+  assert.equal(calls[0].body.text, "\u2063");
+  assert.ok(!calls[0].body.text.includes("系列剧情"));
   assert.ok(!calls[0].body.text.includes("我同情我那30岁还是处男的妹夫"));
   assert.deepEqual(calls[0].body.reply_markup, {
     inline_keyboard: [[{
-      text: "我同情我那30岁还是处男的妹夫，于是满足了他毕生的愿望。【1】",
+      text: "【1】 我同情我那30岁还是处男的妹夫，于是满足了他毕生的愿望。",
       callback_data: "story:v:story_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1",
     }]],
   });
