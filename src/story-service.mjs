@@ -156,6 +156,7 @@ export function createStoryService({ searchService }) {
         query: null,
         page: 1,
       });
+      await clearSelectedMedia(db, userId);
       return story;
     },
 
@@ -163,9 +164,17 @@ export function createStoryService({ searchService }) {
       assertDatabase(db);
       const row = await db
         .prepare(
-          `SELECT tg_user_id, story_id, mode, query, page, updated_at
-           FROM story_series_sessions
-           WHERE tg_user_id = ?`,
+          `SELECT
+             sss.tg_user_id,
+             sss.story_id,
+             sss.mode,
+             sss.query,
+             sss.page,
+             sss.updated_at,
+             (SELECT COUNT(*) FROM story_series_session_media sm
+                WHERE sm.tg_user_id = sss.tg_user_id) AS selected_count
+           FROM story_series_sessions sss
+           WHERE sss.tg_user_id = ?`,
         )
         .bind(normalizeUserId(userId))
         .first();
@@ -191,39 +200,99 @@ export function createStoryService({ searchService }) {
       return { ...session, query: nextQuery, page: normalizePage(page) };
     },
 
-    async addMediaToActiveStory(db, { userId, mediaId }) {
+    async toggleMediaSelection(db, { userId, mediaId }) {
       const session = await this.getSession(db, userId);
       if (!session || session.mode !== "awaiting_media_query" || !isMediaId(mediaId)) {
-        return { outcome: "no_active_story" };
+        return { outcome: "no_active_story", selected_count: 0 };
       }
       const media = await searchService.getMedia(db, mediaId, { includeChannelLinks: true });
       if (!media) {
-        return { outcome: "media_not_found" };
+        return { outcome: "media_not_found", selected_count: session.selected_count };
+      }
+      const now = new Date().toISOString();
+      const inserted = await db
+        .prepare(
+          `INSERT INTO story_series_session_media (tg_user_id, media_id, selected_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT (tg_user_id, media_id) DO NOTHING`,
+        )
+        .bind(normalizeUserId(userId), media.id, now)
+        .run();
+      const changes = inserted?.meta?.changes ?? inserted?.changes ?? 0;
+      if (changes === 0) {
+        await db
+          .prepare(
+            "DELETE FROM story_series_session_media WHERE tg_user_id = ? AND media_id = ?",
+          )
+          .bind(normalizeUserId(userId), media.id)
+          .run();
+      }
+      return {
+        outcome: changes > 0 ? "selected" : "deselected",
+        media,
+        selected_count: await countSelectedMedia(db, userId),
+      };
+    },
+
+    async listSelectedMediaIds(db, userId) {
+      assertDatabase(db);
+      const result = await db
+        .prepare(
+          "SELECT media_id FROM story_series_session_media WHERE tg_user_id = ? ORDER BY selected_at, media_id",
+        )
+        .bind(normalizeUserId(userId))
+        .all();
+      return (result.results ?? []).map((row) => row.media_id).filter(isMediaId);
+    },
+
+    async commitMediaSelection(db, { userId }) {
+      const session = await this.getSession(db, userId);
+      if (!session || session.mode !== "awaiting_media_query") {
+        return { outcome: "no_active_story", added_count: 0, selected_count: 0 };
       }
       const story = await this.getStory(db, session.story_id);
       if (!story) {
-        return { outcome: "story_not_found" };
+        return { outcome: "story_not_found", added_count: 0, selected_count: session.selected_count };
+      }
+      const selected = await db
+        .prepare(
+          `SELECT sm.media_id
+           FROM story_series_session_media sm
+           JOIN media m ON m.id = sm.media_id
+           WHERE sm.tg_user_id = ? AND m.status = ?
+           ORDER BY sm.selected_at, sm.media_id`,
+        )
+        .bind(normalizeUserId(userId), APPROVED_STATUS)
+        .all();
+      const mediaIds = (selected.results ?? []).map((row) => row.media_id);
+      if (mediaIds.length === 0) {
+        return { outcome: "no_selection", added_count: 0, selected_count: 0, story };
       }
       const now = new Date().toISOString();
-      const insert = await db
+      const writes = mediaIds.map((mediaId) => db
         .prepare(
           `INSERT INTO story_series_media (story_id, media_id, added_by_tg_user_id, added_at)
            VALUES (?, ?, ?, ?)
            ON CONFLICT (story_id, media_id) DO NOTHING`,
         )
-        .bind(story.id, media.id, normalizeUserId(userId), now)
-        .run();
-      const changes = insert?.meta?.changes ?? insert?.changes ?? 0;
-      if (changes > 0) {
+        .bind(story.id, mediaId, normalizeUserId(userId), now));
+      const inserted = await db.batch(writes);
+      const addedCount = inserted.reduce(
+        (total, result) => total + Number(result?.meta?.changes ?? result?.changes ?? 0),
+        0,
+      );
+      if (addedCount > 0) {
         await db
           .prepare("UPDATE story_series SET updated_at = ? WHERE id = ?")
           .bind(now, story.id)
           .run();
       }
+      await clearSelectedMedia(db, userId);
       return {
-        outcome: changes > 0 ? "added" : "already_added",
+        outcome: "committed",
+        added_count: addedCount,
+        selected_count: mediaIds.length,
         story: await this.getStory(db, story.id),
-        media,
       };
     },
 
@@ -254,6 +323,7 @@ function formatSession(row) {
     mode: row.mode,
     query: row.query,
     page: normalizePage(Number(row.page)),
+    selected_count: Number(row.selected_count ?? 0),
     updated_at: row.updated_at,
   };
 }
@@ -300,6 +370,21 @@ function normalizePageSize(value) {
 
 function emptyPage(page, pageSize) {
   return { page: normalizePage(page), page_size: normalizePageSize(pageSize), total: 0, results: [] };
+}
+
+async function countSelectedMedia(db, userId) {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS total FROM story_series_session_media WHERE tg_user_id = ?")
+    .bind(normalizeUserId(userId))
+    .first();
+  return Number(row?.total ?? 0);
+}
+
+async function clearSelectedMedia(db, userId) {
+  await db
+    .prepare("DELETE FROM story_series_session_media WHERE tg_user_id = ?")
+    .bind(normalizeUserId(userId))
+    .run();
 }
 
 async function writeSession(db, { userId, storyId, mode, query, page }) {

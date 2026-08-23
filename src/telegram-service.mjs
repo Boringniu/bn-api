@@ -197,44 +197,54 @@ export function createTelegramService({
         });
       }
 
-      if (action.type === "add") {
-        const result = await storyService.addMediaToActiveStory(db, {
+      if (action.type === "select") {
+        const result = await storyService.toggleMediaSelection(db, {
           userId,
           mediaId: action.mediaId,
         });
         const text = {
-          added: "已加入当前剧情。",
-          already_added: "该视频已在当前剧情中。",
+          selected: `已选择，当前共 ${result.selected_count} 部。`,
+          deselected: `已取消选择，当前共 ${result.selected_count} 部。`,
           media_not_found: "该视频已不存在或未审核。",
-          story_not_found: "当前剧情已不存在。",
           no_active_story: "当前没有正在管理的剧情。",
         }[result.outcome] ?? "操作失败，请重试。";
         await this.callTelegram(env, "answerCallbackQuery", {
           callback_query_id: callback.id,
           text,
-          show_alert: result.outcome !== "added" && result.outcome !== "already_added",
+          show_alert: result.outcome === "media_not_found" || result.outcome === "no_active_story",
         });
-        return { chat_id: chatId, story_media_outcome: result.outcome };
+        if (result.outcome !== "selected" && result.outcome !== "deselected") {
+          return { chat_id: chatId, story_media_outcome: result.outcome };
+        }
+        return editStorySelectionMessage(this, db, callback, env, {
+          storyService,
+          userId,
+          page: (await storyService.getSession(db, userId))?.page ?? 1,
+          answerCallback: false,
+        });
       }
 
-      if (action.type === "done") {
-        const session = await storyService.getSession(db, userId);
+      if (action.type === "commit") {
+        const result = await storyService.commitMediaSelection(db, { userId });
+        if (result.outcome !== "committed") {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: result.outcome === "no_selection" ? "请先勾选至少一部视频。" : "当前剧情选片已失效。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, story_media_outcome: result.outcome };
+        }
         await storyService.clearSession(db, userId);
-        const story = session?.story_id
-          ? await storyService.getStory(db, session.story_id)
-          : null;
         return editStoryMessage(this, env, callback, {
-          text: story
-            ? `✅ 已完成“${escapeHtml(story.title)}”的选片，当前共 ${story.video_count} 条视频。`
-            : "已结束剧情选片。",
-          replyMarkup: null,
+          text: `✅ 已向“${escapeHtml(result.story.title)}”加入 ${result.added_count} 部视频；本次勾选 ${result.selected_count} 部，当前共 ${result.story.video_count} 条视频。`,
+          replyMarkup: buildStoryCreatedMarkup(result.story),
         });
       }
 
       if (action.type === "cancel") {
         await storyService.clearSession(db, userId);
         return editStoryMessage(this, env, callback, {
-          text: "已取消本次剧情选片，已加入的视频仍会保留。",
+          text: "已取消本次选片，未加入任何本次勾选的视频。",
           replyMarkup: null,
         });
       }
@@ -423,12 +433,14 @@ export function createTelegramService({
           } else {
             await storyService.setMediaQuery(db, { userId, query: text, page: 1 });
             const search = await resolveDirectorySearch(db, text, 1);
+            const selectedMediaIds = await storyService.listSelectedMediaIds(db, userId);
             reply = formatStorySelectionReply(story, {
               query: text,
               resolution: search.resolution,
               searchResult: search.result,
+              selectedCount: selectedMediaIds.length,
             });
-            replyMarkup = buildStorySelectionMarkup(story, search.result);
+            replyMarkup = buildStorySelectionMarkup(story, search.result, selectedMediaIds);
           }
         }
       } else if (text === "/duplicates" || command === "/delete") {
@@ -1671,11 +1683,17 @@ export function createTelegramService({
     return data.length <= 64 ? data : null;
   }
 
-  async function editStoryMessage(telegramService, env, callback, { text, replyMarkup }) {
+  async function editStoryMessage(telegramService, env, callback, {
+    text,
+    replyMarkup,
+    answerCallback = true,
+  }) {
     const chatId = callback.message.chat.id;
-    await telegramService.callTelegram(env, "answerCallbackQuery", {
-      callback_query_id: callback.id,
-    });
+    if (answerCallback) {
+      await telegramService.callTelegram(env, "answerCallbackQuery", {
+        callback_query_id: callback.id,
+      });
+    }
     try {
       await telegramService.callTelegram(env, "editMessageText", {
         chat_id: chatId,
@@ -1697,6 +1715,7 @@ export function createTelegramService({
     storyService: activeStoryService,
     userId,
     page,
+    answerCallback = true,
   }) {
     const session = await activeStoryService.getSession(db, userId);
     const story = session?.story_id
@@ -1707,16 +1726,20 @@ export function createTelegramService({
       return editStoryMessage(telegramService, env, callback, {
         text: "当前剧情选片已失效，请重新点击“管理视频”。",
         replyMarkup: null,
+        answerCallback,
       });
     }
     const search = await resolveDirectorySearch(db, session.query, page);
+    const selectedMediaIds = await activeStoryService.listSelectedMediaIds(db, userId);
     return editStoryMessage(telegramService, env, callback, {
       text: formatStorySelectionReply(story, {
         query: session.query,
         resolution: search.resolution,
         searchResult: search.result,
+        selectedCount: selectedMediaIds.length,
       }),
-      replyMarkup: buildStorySelectionMarkup(story, search.result),
+      replyMarkup: buildStorySelectionMarkup(story, search.result, selectedMediaIds),
+      answerCallback,
     });
   }
 
@@ -1738,7 +1761,7 @@ export function createTelegramService({
   }
 
   function formatStoryManagementPrompt(story) {
-    return `<b>正在管理：</b>${escapeHtml(story.title)}【${story.video_count}】\n\n请直接输入番号、番号前缀、演员名或 #话题，Bot 会显示匹配视频；点击“加入当前剧情”即可关联。`;
+    return `<b>正在管理：</b>${escapeHtml(story.title)}【${story.video_count}】\n\n请直接输入番号、番号前缀、演员名或 #话题。结果中可一次勾选多部视频，最后点击“加入已选视频”统一关联。`;
   }
 
   function formatStoryMediaPage(story, page, renderResults) {
@@ -1749,8 +1772,13 @@ export function createTelegramService({
     return `${header}\n\n${renderResults(page)}`;
   }
 
-  function formatStorySelectionReply(story, { query, resolution, searchResult }) {
-    const heading = `<b>为“${escapeHtml(story.title)}”选择视频</b>`;
+  function formatStorySelectionReply(story, {
+    query,
+    resolution,
+    searchResult,
+    selectedCount = 0,
+  }) {
+    const heading = `<b>为“${escapeHtml(story.title)}”选择视频</b>\n已选 ${selectedCount} 部`;
     return `${heading}\n\n${renderSearchReply({ query, resolution, searchResult })}`;
   }
 
@@ -1819,15 +1847,19 @@ export function createTelegramService({
     return { inline_keyboard: rows };
   }
 
-  function buildStorySelectionMarkup(story, searchResult) {
+  function buildStorySelectionMarkup(story, searchResult, selectedMediaIds = []) {
+    const selected = new Set(selectedMediaIds);
     const rows = [];
     for (const media of searchResult.results) {
-      const callbackData = encodeStoryCallback("add", media.id);
+      const callbackData = encodeStoryCallback("select", media.id);
       if (!callbackData) {
         continue;
       }
       const code = media.code ? `#${media.code}` : "未标号视频";
-      rows.push([{ text: `加入当前剧情 · ${code}`, callback_data: callbackData }]);
+      rows.push([{
+        text: `${selected.has(media.id) ? "☑ 已选" : "□ 选择"} · ${code}`,
+        callback_data: callbackData,
+      }]);
     }
     const pagination = [];
     if (searchResult.page > 1) {
@@ -1839,7 +1871,11 @@ export function createTelegramService({
     if (pagination.length > 0) {
       rows.push(pagination.filter((entry) => entry.callback_data));
     }
-    rows.push([{ text: "完成", callback_data: encodeStoryCallback("done") }, { text: "取消", callback_data: encodeStoryCallback("cancel") }]);
+    rows.push([{
+      text: `加入已选视频（${selected.size}）`,
+      callback_data: encodeStoryCallback("commit"),
+    }]);
+    rows.push([{ text: "取消", callback_data: encodeStoryCallback("cancel") }]);
     return { inline_keyboard: rows };
   }
 
@@ -1849,8 +1885,8 @@ export function createTelegramService({
       view: "v",
       manage: "m",
       query_page: "q",
-      add: "a",
-      done: "d",
+      select: "s",
+      commit: "c",
       cancel: "x",
     }[action];
     if (!actionCode) {
@@ -1872,7 +1908,7 @@ export function createTelegramService({
         return null;
       }
       data += `:${value}`;
-    } else if (action === "add") {
+    } else if (action === "select") {
       if (!isMediaIdentifier(value)) {
         return null;
       }
@@ -1901,12 +1937,18 @@ export function createTelegramService({
     if (match) {
       return { type: "query_page", page: Number(match[1]) };
     }
+    match = /^story:s:(media_[a-f0-9]{32})$/iu.exec(data);
+    if (match) {
+      return { type: "select", mediaId: match[1].toLowerCase() };
+    }
+    // 兼容部署前已发送的“加入当前剧情”旧按钮：点击后只改为勾选，
+    // 不再直接建立剧情—视频关联。
     match = /^story:a:(media_[a-f0-9]{32})$/iu.exec(data);
     if (match) {
-      return { type: "add", mediaId: match[1].toLowerCase() };
+      return { type: "select", mediaId: match[1].toLowerCase() };
     }
-    if (data === "story:d") {
-      return { type: "done" };
+    if (data === "story:c" || data === "story:d") {
+      return { type: "commit" };
     }
     if (data === "story:x") {
       return { type: "cancel" };

@@ -1096,20 +1096,75 @@ test("newstory starts title entry then creates an empty top-level story for admi
   });
 });
 
-test("admin story selection adds an existing video without moving the channel resource", async () => {
+test("admin story selection supports multiple checked videos before one batch add", async () => {
   const calls = [];
   const story = {
     id: "story_cccccccccccccccccccccccccccccccc",
     title: "新的系列剧情",
     video_count: 1,
   };
+  const mediaId = "media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const session = { mode: "awaiting_media_query", story_id: story.id, query: "ABP-123", page: 1 };
   const storyService = {
-    async getSession() {
-      return { mode: "awaiting_media_query", story_id: story.id, query: "ABP-123", page: 1 };
+    async getSession() { return session; },
+    async getStory() { return story; },
+    async toggleMediaSelection() {
+      return { outcome: "selected", selected_count: 2 };
     },
-    async addMediaToActiveStory() {
-      return { outcome: "added", story, media: sampleMedia };
+    async listSelectedMediaIds() {
+      return [mediaId, "media_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"];
     },
+  };
+  const searchService = createSearchStub({
+    resolution: { type: "code", code: "ABP-123" },
+    media: [{ ...sampleMedia, id: mediaId }],
+  });
+  const service = createService({
+    searchService,
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+
+  const db = new FakeD1();
+  const result = await service.handleUpdate(db, {
+    callback_query: {
+      id: "story-select-1",
+      data: `story:s:${mediaId}`,
+      from: { id: 222 },
+      message: { message_id: 89, chat: { id: 111, type: "private" } },
+    },
+  }, { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" });
+
+  assert.deepEqual(result, { chat_id: 111, replied: true });
+  assert.deepEqual(calls[0], {
+    method: "answerCallbackQuery",
+    body: { callback_query_id: "story-select-1", text: "已选择，当前共 2 部。", show_alert: false },
+  });
+  assert.equal(calls[1].method, "editMessageText");
+  assert.equal(calls[1].body.reply_markup.inline_keyboard[0][0].text, "☑ 已选 · #ABP-123");
+  assert.deepEqual(calls[1].body.reply_markup.inline_keyboard.at(-2), [{
+    text: "加入已选视频（2）",
+    callback_data: "story:c",
+  }]);
+  assert.ok(!db.statements.some((statement) => statement.sql.includes("story_series_media")));
+});
+
+test("admin story selection commits all checked videos in one operation", async () => {
+  const calls = [];
+  const story = {
+    id: "story_cccccccccccccccccccccccccccccccc",
+    title: "新的系列剧情",
+    video_count: 4,
+  };
+  const storyService = {
+    async getSession() { return { mode: "awaiting_media_query", story_id: story.id }; },
+    async commitMediaSelection() {
+      return { outcome: "committed", added_count: 3, selected_count: 3, story };
+    },
+    async clearSession() {},
   };
   const service = createService({
     storyService,
@@ -1121,18 +1176,17 @@ test("admin story selection adds an existing video without moving the channel re
 
   const result = await service.handleUpdate(new FakeD1(), {
     callback_query: {
-      id: "story-add-1",
-      data: "story:a:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      id: "story-commit-1",
+      data: "story:c",
       from: { id: 222 },
-      message: { message_id: 89, chat: { id: 111, type: "private" } },
+      message: { message_id: 90, chat: { id: 111, type: "private" } },
     },
   }, { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" });
 
-  assert.deepEqual(result, { chat_id: 111, story_media_outcome: "added" });
-  assert.deepEqual(calls, [{
-    method: "answerCallbackQuery",
-    body: { callback_query_id: "story-add-1", text: "已加入当前剧情。", show_alert: false },
-  }]);
+  assert.deepEqual(result, { chat_id: 111, replied: true });
+  assert.equal(calls[0].method, "answerCallbackQuery");
+  assert.equal(calls[1].method, "editMessageText");
+  assert.ok(calls[1].body.text.includes("加入 3 部视频；本次勾选 3 部，当前共 4 条视频"));
 });
 
 test("admin private forward from the configured legacy channel is indexed then deleted", async () => {
