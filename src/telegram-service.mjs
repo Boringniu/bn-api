@@ -6,6 +6,7 @@ const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
 const INDEX_ITEMS_PER_BLOCK = 24;
 const BOT_DESCRIPTION_LIMIT = 240;
+const SEARCH_RESULT_DELETE_CALLBACK = "search:delete-result";
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
@@ -77,6 +78,35 @@ export function createTelegramService({
         .join("\n");
     },
 
+    async deleteSearchResultMessage(callback, env) {
+      const chatId = callback?.message?.chat?.id;
+      const messageId = callback?.message?.message_id;
+      if (!chatId || !messageId || callback?.message?.chat?.type !== "private") {
+        return { ignored: "non_private_search_result_delete" };
+      }
+      try {
+        await this.callTelegram(env, "deleteMessage", {
+          chat_id: chatId,
+          message_id: messageId,
+        });
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "已删除本条搜索结果。",
+        });
+        return { chat_id: chatId, deleted_search_result: true };
+      } catch (error) {
+        console.error("search result message deletion failed", {
+          message: error?.message,
+        });
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "删除失败，请重试。",
+          show_alert: true,
+        });
+        return { chat_id: chatId, deleted_search_result: false };
+      }
+    },
+
     async handleSearchNavigation(db, callback, env) {
       const chatId = callback?.message?.chat?.id;
       if (!chatId || callback?.message?.chat?.type !== "private") {
@@ -130,6 +160,9 @@ export function createTelegramService({
         return this.handleEditedChannelPost(db, update.edited_channel_post, env);
       }
       if (update?.callback_query) {
+        if (update.callback_query.data === SEARCH_RESULT_DELETE_CALLBACK) {
+          return this.deleteSearchResultMessage(update.callback_query, env);
+        }
         const duplicateAction = decodeDuplicateDeletionCallback(update.callback_query.data);
         if (duplicateAction) {
           return this.handleDuplicateDeletionCallback(
@@ -1401,9 +1434,7 @@ export function createTelegramService({
 
   function buildSearchNavigationMarkup(query, searchResult) {
     const totalPages = Math.ceil(searchResult.total / searchResult.page_size);
-    if (totalPages <= 1) {
-      return null;
-    }
+    const rows = [];
     const buttons = [];
     if (searchResult.page > 1) {
       const data = encodeSearchNavigation(query, searchResult.page - 1);
@@ -1417,7 +1448,11 @@ export function createTelegramService({
         buttons.push({ text: "下一页 ›", callback_data: data });
       }
     }
-    return buttons.length > 0 ? { inline_keyboard: [buttons] } : null;
+    if (buttons.length > 0) {
+      rows.push(buttons);
+    }
+    rows.push([{ text: "删除本条结果", callback_data: SEARCH_RESULT_DELETE_CALLBACK }]);
+    return { inline_keyboard: rows };
   }
 
   function encodeSearchNavigation(query, page) {

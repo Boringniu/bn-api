@@ -958,7 +958,10 @@ test("private bot adds next-page navigation and edits the result on callback", a
   );
   assert.equal(calls[0].method, "sendMessage");
   assert.deepEqual(calls[0].body.reply_markup, {
-    inline_keyboard: [[{ text: "下一页 ›", callback_data: "search:2:ADN" }]],
+    inline_keyboard: [
+      [{ text: "下一页 ›", callback_data: "search:2:ADN" }],
+      [{ text: "删除本条结果", callback_data: "search:delete-result" }],
+    ],
   });
 
   await service.handleUpdate(
@@ -976,8 +979,47 @@ test("private bot adds next-page navigation and edits the result on callback", a
   assert.equal(calls[2].method, "editMessageText");
   assert.ok(calls[2].body.text.startsWith("11 •"));
   assert.deepEqual(calls[2].body.reply_markup, {
-    inline_keyboard: [[{ text: "‹ 上一页", callback_data: "search:1:ADN" }]],
+    inline_keyboard: [
+      [{ text: "‹ 上一页", callback_data: "search:1:ADN" }],
+      [{ text: "删除本条结果", callback_data: "search:delete-result" }],
+    ],
   });
+});
+
+test("search result delete button removes only the bot reply message", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+  const db = new FakeD1();
+
+  const result = await service.handleUpdate(
+    db,
+    {
+      callback_query: {
+        id: "search-delete-1",
+        data: "search:delete-result",
+        message: { message_id: 88, chat: { id: 111, type: "private" } },
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  assert.deepEqual(result, { chat_id: 111, deleted_search_result: true });
+  assert.deepEqual(calls, [
+    { method: "deleteMessage", body: { chat_id: 111, message_id: 88 } },
+    {
+      method: "answerCallbackQuery",
+      body: { callback_query_id: "search-delete-1", text: "已删除本条搜索结果。" },
+    },
+  ]);
+  assert.equal(
+    db.statements.filter((statement) => /^(INSERT|UPDATE|DELETE)/iu.test(statement.sql.trim())).length,
+    0,
+  );
 });
 
 test("admin private forward from the configured legacy channel is indexed then deleted", async () => {
