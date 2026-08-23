@@ -129,12 +129,17 @@ test("caps channel actors and tags at configured maximums", () => {
 
 test("bot results render a clickable code and every native hashtag", () => {
   const text = createService().renderBotResults({
-    results: [{ ...sampleMedia, raw_tags: ["人妻", "剧情", "中文字幕"], video_count: 3 }],
+    results: [{
+      ...sampleMedia,
+      raw_tags: ["人妻", "剧情", "中文字幕"],
+      description: "频道发布时的资源介绍 <仅作示例>",
+      video_count: 3,
+    }],
   });
 
   assert.equal(
     text,
-    '1 • <a href="https://t.me/c/4396154285/88">#ABP-123</a>  <a href="https://t.me/c/4396154285/88">#人妻</a>  <a href="https://t.me/c/4396154285/88">#剧情</a>  <a href="https://t.me/c/4396154285/88">#中文字幕</a>',
+    '1 • <a href="https://t.me/c/4396154285/88">#ABP-123</a>  <a href="https://t.me/c/4396154285/88">#人妻</a>  <a href="https://t.me/c/4396154285/88">#剧情</a>  <a href="https://t.me/c/4396154285/88">#中文字幕</a>\n<b>简介：</b>频道发布时的资源介绍 &lt;仅作示例&gt;',
   );
   assert.ok(!text.includes("3 个视频"));
   assert.ok(!text.includes("共 1 条结果"));

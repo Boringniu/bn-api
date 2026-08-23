@@ -7,6 +7,7 @@ const PUBLIC_MEDIA_COLUMNS = `
   m.id,
   m.normalized_code,
   m.title,
+  m.description,
   m.release_date,
   m.year,
   m.subtitle,
@@ -239,6 +240,7 @@ export function createSearchService({
     return {
       id: row.id,
       title: row.title,
+      description: row.description,
       code: row.normalized_code,
       release_date: row.release_date,
       year: row.year,

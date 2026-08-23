@@ -100,6 +100,7 @@ test("findMedia queries only approved media with clamped paging", async () => {
   const listSql = db.statements[0].sql;
   assert.match(listSql, /m\.status = 'approved'/);
   assert.match(listSql, /m\.category_id = \?/);
+  assert.match(listSql, /m\.description/);
   assert.ok(!listSql.includes("raw_payload_json"));
   assert.ok(!listSql.includes("source_url"));
 });

@@ -5,6 +5,7 @@ const TELEGRAM_API = "https://api.telegram.org";
 const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
 const INDEX_ITEMS_PER_BLOCK = 24;
+const BOT_DESCRIPTION_LIMIT = 240;
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
@@ -1457,7 +1458,25 @@ export function createTelegramService({
   const tagEntries = [...new Set(rawTags)]
     .filter(Boolean)
     .map((tag) => linkEntry(`#${tag}`));
-  return `${index} • ${[linkEntry(code), ...tagEntries].join("  ")}`;
+  const description = summarizeBotDescription(media.description);
+  const lines = [`${index} • ${[linkEntry(code), ...tagEntries].join("  ")}`];
+  if (description) {
+    lines.push(`<b>简介：</b>${escapeHtml(description)}`);
+  }
+  return lines.join("\n");
+}
+
+function summarizeBotDescription(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const compact = value.replace(/\s+/gu, " ").trim();
+  if (!compact) {
+    return "";
+  }
+  return compact.length > BOT_DESCRIPTION_LIMIT
+    ? `${compact.slice(0, BOT_DESCRIPTION_LIMIT - 1)}…`
+    : compact;
 }
 
 function groupRowsBy(rows, key) {
