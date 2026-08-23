@@ -1096,6 +1096,121 @@ test("newstory starts title entry then creates an empty top-level story for admi
   });
 });
 
+test("story deletion requires a second confirmation and only removes the story relation", async () => {
+  const calls = [];
+  const story = {
+    id: "story_ffffffffffffffffffffffffffffffff",
+    title: "待删除剧情",
+    video_count: 2,
+  };
+  const storyService = {
+    async getStory() { return story; },
+    async deleteStory() {
+      return { outcome: "deleted_story", story, removed_media_count: 2 };
+    },
+  };
+  const service = createService({
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" };
+  const callback = (id, data) => ({
+    callback_query: {
+      id,
+      data,
+      from: { id: 222 },
+      message: { message_id: 91, chat: { id: 111, type: "private" } },
+    },
+  });
+
+  await service.handleUpdate(new FakeD1(), callback("story-delete-prompt", `story:t:${story.id}`), env);
+  assert.ok(calls[1].body.text.includes("确认删除一级剧情"));
+  assert.equal(calls[1].body.reply_markup.inline_keyboard[0][0].callback_data, `story:tc:${story.id}`);
+
+  await service.handleUpdate(new FakeD1(), callback("story-delete-confirm", `story:tc:${story.id}`), env);
+  assert.ok(calls[3].body.text.includes("已删除剧情“待删除剧情”"));
+  assert.ok(calls[3].body.text.includes("频道视频与媒体目录未删除"));
+});
+
+test("non-admin cannot delete a story through a forged callback", async () => {
+  const calls = [];
+  let deleteCalls = 0;
+  const storyService = {
+    async deleteStory() {
+      deleteCalls += 1;
+      return { outcome: "deleted_story" };
+    },
+  };
+  const service = createService({
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+
+  await service.handleUpdate(new FakeD1(), {
+    callback_query: {
+      id: "story-delete-forged",
+      data: "story:tc:story_ffffffffffffffffffffffffffffffff",
+      from: { id: 333 },
+      message: { message_id: 91, chat: { id: 111, type: "private" } },
+    },
+  }, { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" });
+
+  assert.equal(deleteCalls, 0);
+  assert.equal(calls[0].method, "answerCallbackQuery");
+  assert.equal(calls[0].body.text, "权限不足");
+  assert.equal(calls[0].body.show_alert, true);
+});
+
+test("story media removal requires a second confirmation and does not delete media", async () => {
+  const calls = [];
+  const story = {
+    id: "story_abababababababababababababababab",
+    title: "保留频道视频",
+    video_count: 1,
+  };
+  const mediaId = "media_cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+  const media = { ...sampleMedia, id: mediaId, code: "ADN-511" };
+  const storyService = {
+    async getMediaRemovalSession() { return { story_id: story.id }; },
+    async getStory() { return story; },
+    async removeMediaFromStory() {
+      return { outcome: "removed_story_media", story: { ...story, video_count: 0 }, media };
+    },
+    async findStoryMedia() { return { page: 1, page_size: 10, total: 0, results: [] }; },
+  };
+  const service = createService({
+    storyService,
+    searchService: createSearchStub({ media: [media] }),
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" };
+  const callback = (id, data) => ({
+    callback_query: {
+      id,
+      data,
+      from: { id: 222 },
+      message: { message_id: 92, chat: { id: 111, type: "private" } },
+    },
+  });
+
+  await service.handleUpdate(new FakeD1(), callback("story-remove-prompt", `story:u:${mediaId}`), env);
+  assert.ok(calls[1].body.text.includes("确认移除二级视频"));
+  assert.equal(calls[1].body.reply_markup.inline_keyboard[0][0].callback_data, `story:uc:${mediaId}`);
+
+  await service.handleUpdate(new FakeD1(), callback("story-remove-confirm", `story:uc:${mediaId}`), env);
+  assert.ok(calls[3].body.text.includes("已从“保留频道视频”移除该视频"));
+  assert.ok(calls[3].body.text.includes("频道视频与媒体目录未删除"));
+});
+
 test("admin story selection supports multiple checked videos before one batch add", async () => {
   const calls = [];
   const story = {
@@ -1199,6 +1314,7 @@ test("story selection resolves comma-separated codes into one multi-select resul
 
   assert.ok(calls[0].body.text.includes("已匹配 3/4 部"));
   assert.ok(calls[0].body.text.includes("未找到：ADN-999"));
+  assert.ok(calls[0].body.text.includes("直接把这些频道视频转发到此处"));
   assert.deepEqual(calls[0].body.reply_markup.inline_keyboard.slice(0, 3).map((row) => row[0].text), [
     "□ 选择 · #ADN-405",
     "□ 选择 · #ADN-415",

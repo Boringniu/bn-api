@@ -321,6 +321,109 @@ export function createStoryService({ searchService }) {
       };
     },
 
+    async startMediaRemoval(db, { userId, storyId }) {
+      const story = await this.getStory(db, storyId);
+      if (!story) {
+        return null;
+      }
+      const now = new Date().toISOString();
+      await db
+        .prepare(
+          `INSERT INTO story_series_removal_sessions (tg_user_id, story_id, created_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT (tg_user_id) DO UPDATE SET
+             story_id = excluded.story_id,
+             created_at = excluded.created_at`,
+        )
+        .bind(normalizeUserId(userId), story.id, now)
+        .run();
+      return story;
+    },
+
+    async getMediaRemovalSession(db, userId) {
+      assertDatabase(db);
+      const row = await db
+        .prepare(
+          "SELECT tg_user_id, story_id, created_at FROM story_series_removal_sessions WHERE tg_user_id = ?",
+        )
+        .bind(normalizeUserId(userId))
+        .first();
+      return row ?? null;
+    },
+
+    async clearMediaRemovalSession(db, userId) {
+      assertDatabase(db);
+      await db
+        .prepare("DELETE FROM story_series_removal_sessions WHERE tg_user_id = ?")
+        .bind(normalizeUserId(userId))
+        .run();
+    },
+
+    async deleteStory(db, { userId, storyId }) {
+      const story = await this.getStory(db, storyId);
+      if (!story) {
+        return { outcome: "story_not_found" };
+      }
+      const linked = await db
+        .prepare("SELECT media_id FROM story_series_media WHERE story_id = ? ORDER BY added_at, media_id")
+        .bind(story.id)
+        .all();
+      await writeStoryAudit(db, {
+        operation: "delete_story",
+        storyId: story.id,
+        mediaId: null,
+        userId,
+        snapshot: { story, media_ids: (linked.results ?? []).map((row) => row.media_id) },
+      });
+      await db.prepare("DELETE FROM story_series WHERE id = ?").bind(story.id).run();
+      return {
+        outcome: "deleted_story",
+        story,
+        removed_media_count: (linked.results ?? []).length,
+      };
+    },
+
+    async removeMediaFromStory(db, { userId, storyId, mediaId }) {
+      if (!isStoryId(storyId) || !isMediaId(mediaId)) {
+        return { outcome: "story_media_not_found" };
+      }
+      const story = await this.getStory(db, storyId);
+      if (!story) {
+        return { outcome: "story_not_found" };
+      }
+      const relation = await db
+        .prepare(
+          "SELECT added_at, added_by_tg_user_id FROM story_series_media WHERE story_id = ? AND media_id = ?",
+        )
+        .bind(story.id, mediaId)
+        .first();
+      if (!relation) {
+        return { outcome: "story_media_not_found" };
+      }
+      const media = await searchService.getMedia(db, mediaId, { includeChannelLinks: true });
+      const now = new Date().toISOString();
+      await writeStoryAudit(db, {
+        operation: "remove_story_media",
+        storyId: story.id,
+        mediaId,
+        userId,
+        snapshot: { story, media, relation },
+      });
+      await db
+        .prepare("DELETE FROM story_series_media WHERE story_id = ? AND media_id = ?")
+        .bind(story.id, mediaId)
+        .run();
+      await db
+        .prepare("UPDATE story_series SET updated_at = ? WHERE id = ?")
+        .bind(now, story.id)
+        .run();
+      return {
+        outcome: "removed_story_media",
+        story: await this.getStory(db, story.id),
+        media,
+      };
+    },
+
     async clearSession(db, userId) {
       assertDatabase(db);
       await db
@@ -377,6 +480,10 @@ function newStoryId() {
   return `story_${crypto.randomUUID().replaceAll("-", "")}`;
 }
 
+function newStoryAuditId() {
+  return `story_audit_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
 function isStoryId(value) {
   return /^story_[a-f0-9]{32}$/iu.test(value ?? "");
 }
@@ -409,6 +516,32 @@ async function clearSelectedMedia(db, userId) {
   await db
     .prepare("DELETE FROM story_series_session_media WHERE tg_user_id = ?")
     .bind(normalizeUserId(userId))
+    .run();
+}
+
+async function writeStoryAudit(db, {
+  operation,
+  storyId,
+  mediaId,
+  userId,
+  snapshot,
+}) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO story_series_admin_audit (
+         id, operation, story_id, media_id, operator_tg_user_id, snapshot_json, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      newStoryAuditId(),
+      operation,
+      storyId,
+      mediaId,
+      normalizeUserId(userId),
+      JSON.stringify(snapshot),
+      now,
+    )
     .run();
 }
 

@@ -176,6 +176,134 @@ export function createTelegramService({
         return { chat_id: chatId, story_management_started: story.id };
       }
 
+      if (action.type === "delete_story_prompt") {
+        const story = await storyService.getStory(db, action.storyId);
+        if (!story) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该剧情条目已不存在。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "story_not_found" };
+        }
+        return editStoryMessage(this, env, callback, {
+          text: formatStoryDeleteConfirmation(story),
+          replyMarkup: buildStoryDeleteConfirmationMarkup(story),
+        });
+      }
+
+      if (action.type === "delete_story_confirm") {
+        const result = await storyService.deleteStory(db, { userId, storyId: action.storyId });
+        if (result.outcome !== "deleted_story") {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该剧情条目已不存在。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: result.outcome };
+        }
+        return editStoryMessage(this, env, callback, {
+          text: `✅ 已删除剧情“${escapeHtml(result.story.title)}”，已解除 ${result.removed_media_count} 条视频关联。频道视频与媒体目录未删除。`,
+          replyMarkup: { inline_keyboard: [[{
+            text: "返回剧情目录",
+            callback_data: encodeStoryCallback("list", 1),
+          }]] },
+        });
+      }
+
+      if (action.type === "removal_start") {
+        const story = await storyService.startMediaRemoval(db, { userId, storyId: action.storyId });
+        if (!story) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该剧情条目已不存在。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "story_not_found" };
+        }
+        const page = await storyService.findStoryMedia(db, {
+          storyId: story.id,
+          page: 1,
+          pageSize: botResult.page_size,
+        });
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+        });
+        await this.callTelegram(env, "sendMessage", {
+          chat_id: chatId,
+          text: formatStoryRemovalPage(story, page, this.renderBotResults.bind(this)),
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+          reply_markup: buildStoryRemovalMarkup(page),
+        });
+        return { chat_id: chatId, story_removal_started: story.id };
+      }
+
+      if (action.type === "removal_page") {
+        return editStoryRemovalMessage(this, db, callback, env, {
+          storyService,
+          userId,
+          page: action.page,
+        });
+      }
+
+      if (action.type === "remove_story_media_prompt") {
+        const session = await storyService.getMediaRemovalSession(db, userId);
+        const story = session?.story_id ? await storyService.getStory(db, session.story_id) : null;
+        const media = await searchService.getMedia(db, action.mediaId, { includeChannelLinks: true });
+        if (!story || !media) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该移除操作已失效，请重新打开“移除二级视频”。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "story_removal_expired" };
+        }
+        return editStoryMessage(this, env, callback, {
+          text: formatStoryMediaRemovalConfirmation(story, media),
+          replyMarkup: buildStoryMediaRemovalConfirmationMarkup(media),
+        });
+      }
+
+      if (action.type === "remove_story_media_confirm") {
+        const session = await storyService.getMediaRemovalSession(db, userId);
+        if (!session?.story_id) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该移除操作已失效，请重新打开“移除二级视频”。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "story_removal_expired" };
+        }
+        const result = await storyService.removeMediaFromStory(db, {
+          userId,
+          storyId: session.story_id,
+          mediaId: action.mediaId,
+        });
+        if (result.outcome !== "removed_story_media") {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该视频已不在当前剧情中。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: result.outcome };
+        }
+        return editStoryRemovalMessage(this, db, callback, env, {
+          storyService,
+          userId,
+          page: 1,
+          notice: `✅ 已从“${escapeHtml(result.story.title)}”移除该视频；频道视频与媒体目录未删除。`,
+        });
+      }
+
+      if (action.type === "removal_cancel") {
+        await storyService.clearMediaRemovalSession(db, userId);
+        return editStoryMessage(this, env, callback, {
+          text: "已退出二级视频移除，不会删除任何资源。",
+          replyMarkup: null,
+        });
+      }
+
       if (action.type === "query_page") {
         const session = await storyService.getSession(db, userId);
         if (!session?.query) {
@@ -1824,6 +1952,35 @@ export function createTelegramService({
     });
   }
 
+  async function editStoryRemovalMessage(telegramService, db, callback, env, {
+    storyService: activeStoryService,
+    userId,
+    page,
+    notice = "",
+  }) {
+    const session = await activeStoryService.getMediaRemovalSession(db, userId);
+    const story = session?.story_id
+      ? await activeStoryService.getStory(db, session.story_id)
+      : null;
+    if (!story) {
+      await activeStoryService.clearMediaRemovalSession(db, userId);
+      return editStoryMessage(telegramService, env, callback, {
+        text: "当前二级视频移除已失效，请重新打开剧情条目。",
+        replyMarkup: null,
+      });
+    }
+    const mediaPage = await activeStoryService.findStoryMedia(db, {
+      storyId: story.id,
+      page,
+      pageSize: botResult.page_size,
+    });
+    const body = formatStoryRemovalPage(story, mediaPage, telegramService.renderBotResults.bind(telegramService));
+    return editStoryMessage(telegramService, env, callback, {
+      text: notice ? `${notice}\n\n${body}` : body,
+      replyMarkup: buildStoryRemovalMarkup(mediaPage),
+    });
+  }
+
   function formatStoryList(page) {
     if (page.total === 0) {
       return "📚 <b>系列剧情</b>\n\n暂未创建系列剧情。";
@@ -1853,6 +2010,23 @@ export function createTelegramService({
     return `${header}\n\n${renderResults(page)}`;
   }
 
+  function formatStoryRemovalPage(story, page, renderResults) {
+    const header = `<b>移除“${escapeHtml(story.title)}”中的二级视频</b>\n当前关联 ${story.video_count} 部`;
+    if (page.total === 0) {
+      return `${header}\n\n该剧情已没有可移除的视频。`;
+    }
+    return `${header}\n\n${renderResults(page)}\n\n点击下方“从当前剧情移除”只会解除剧情关联，不删除频道视频或媒体目录。`;
+  }
+
+  function formatStoryDeleteConfirmation(story) {
+    return `<b>确认删除一级剧情？</b>\n\n“${escapeHtml(story.title)}”【${story.video_count}】将被删除，关联的二级视频会从该剧情解除。频道视频、媒体目录和其他剧情不会被删除。`;
+  }
+
+  function formatStoryMediaRemovalConfirmation(story, media) {
+    const code = media.code ? `#${escapeHtml(media.code)}` : "该视频";
+    return `<b>确认移除二级视频？</b>\n\n将 ${code} 从“${escapeHtml(story.title)}”中移除。频道视频、媒体目录和其他剧情不会被删除。`;
+  }
+
   function formatStorySelectionReply(story, {
     query,
     resolution,
@@ -1870,7 +2044,11 @@ export function createTelegramService({
       lines.push("", ...searchResult.results.map((media, index) => renderDirectoryEntry(media, index + 1)));
     }
     if (resolution.unmatched_codes.length > 0) {
-      lines.push("", `未找到：${escapeHtml(resolution.unmatched_codes.join("、"))}`);
+      lines.push(
+        "",
+        `未找到：${escapeHtml(resolution.unmatched_codes.join("、"))}`,
+        "可直接把这些频道视频转发到此处，Bot 会自动加入本次已选。",
+      );
     }
     return lines.join("\n");
   }
@@ -1935,9 +2113,55 @@ export function createTelegramService({
     }
     if (isUserAdmin) {
       rows.push([{ text: "管理视频", callback_data: encodeStoryCallback("manage", story.id) }]);
+      rows.push([{ text: "移除二级视频", callback_data: encodeStoryCallback("removal_start", story.id) }]);
+      rows.push([{ text: "删除本剧情", callback_data: encodeStoryCallback("delete_story_prompt", story.id) }]);
     }
     rows.push([{ text: "返回剧情目录", callback_data: encodeStoryCallback("list", 1) }]);
     return { inline_keyboard: rows };
+  }
+
+  function buildStoryRemovalMarkup(page) {
+    const rows = [];
+    for (const media of page.results) {
+      const callbackData = encodeStoryCallback("remove_story_media_prompt", media.id);
+      if (!callbackData) {
+        continue;
+      }
+      rows.push([{
+        text: `从当前剧情移除 · ${media.code ? `#${media.code}` : "未标号视频"}`,
+        callback_data: callbackData,
+      }]);
+    }
+    const pagination = [];
+    if (page.page > 1) {
+      pagination.push({ text: "‹ 上一页", callback_data: encodeStoryCallback("removal_page", page.page - 1) });
+    }
+    if (page.page * page.page_size < page.total) {
+      pagination.push({ text: "下一页 ›", callback_data: encodeStoryCallback("removal_page", page.page + 1) });
+    }
+    if (pagination.length > 0) {
+      rows.push(pagination.filter((entry) => entry.callback_data));
+    }
+    rows.push([{ text: "退出移除", callback_data: encodeStoryCallback("removal_cancel") }]);
+    return { inline_keyboard: rows };
+  }
+
+  function buildStoryDeleteConfirmationMarkup(story) {
+    return {
+      inline_keyboard: [
+        [{ text: "确认删除剧情", callback_data: encodeStoryCallback("delete_story_confirm", story.id) }],
+        [{ text: "取消", callback_data: encodeStoryCallback("list", 1) }],
+      ],
+    };
+  }
+
+  function buildStoryMediaRemovalConfirmationMarkup(media) {
+    return {
+      inline_keyboard: [
+        [{ text: "确认移除视频", callback_data: encodeStoryCallback("remove_story_media_confirm", media.id) }],
+        [{ text: "取消", callback_data: encodeStoryCallback("removal_page", 1) }],
+      ],
+    };
   }
 
   function buildStorySelectionMarkup(story, searchResult, selectedMediaIds = []) {
@@ -1981,6 +2205,13 @@ export function createTelegramService({
       select: "s",
       commit: "c",
       cancel: "x",
+      removal_start: "r",
+      removal_page: "p",
+      removal_cancel: "rx",
+      remove_story_media_prompt: "u",
+      remove_story_media_confirm: "uc",
+      delete_story_prompt: "t",
+      delete_story_confirm: "tc",
     }[action];
     if (!actionCode) {
       return null;
@@ -1996,12 +2227,17 @@ export function createTelegramService({
         return null;
       }
       data += `:${value}:${page}`;
-    } else if (action === "manage") {
+    } else if (action === "manage" || action === "removal_start" || action === "delete_story_prompt" || action === "delete_story_confirm") {
       if (!isStoryIdentifier(value)) {
         return null;
       }
       data += `:${value}`;
-    } else if (action === "select") {
+    } else if (action === "removal_page") {
+      if (!Number.isInteger(value) || value < 1 || value > 9999) {
+        return null;
+      }
+      data += `:${value}`;
+    } else if (action === "select" || action === "remove_story_media_prompt" || action === "remove_story_media_confirm") {
       if (!isMediaIdentifier(value)) {
         return null;
       }
@@ -2026,6 +2262,22 @@ export function createTelegramService({
     if (match) {
       return { type: "manage", storyId: match[1].toLowerCase() };
     }
+    match = /^story:r:(story_[a-f0-9]{32})$/iu.exec(data);
+    if (match) {
+      return { type: "removal_start", storyId: match[1].toLowerCase() };
+    }
+    match = /^story:t:(story_[a-f0-9]{32})$/iu.exec(data);
+    if (match) {
+      return { type: "delete_story_prompt", storyId: match[1].toLowerCase() };
+    }
+    match = /^story:tc:(story_[a-f0-9]{32})$/iu.exec(data);
+    if (match) {
+      return { type: "delete_story_confirm", storyId: match[1].toLowerCase() };
+    }
+    match = /^story:p:(\d{1,4})$/u.exec(data);
+    if (match) {
+      return { type: "removal_page", page: Number(match[1]) };
+    }
     match = /^story:q:(\d{1,4})$/u.exec(data);
     if (match) {
       return { type: "query_page", page: Number(match[1]) };
@@ -2033,6 +2285,14 @@ export function createTelegramService({
     match = /^story:s:(media_[a-f0-9]{32})$/iu.exec(data);
     if (match) {
       return { type: "select", mediaId: match[1].toLowerCase() };
+    }
+    match = /^story:u:(media_[a-f0-9]{32})$/iu.exec(data);
+    if (match) {
+      return { type: "remove_story_media_prompt", mediaId: match[1].toLowerCase() };
+    }
+    match = /^story:uc:(media_[a-f0-9]{32})$/iu.exec(data);
+    if (match) {
+      return { type: "remove_story_media_confirm", mediaId: match[1].toLowerCase() };
     }
     // 兼容部署前已发送的“加入当前剧情”旧按钮：点击后只改为勾选，
     // 不再直接建立剧情—视频关联。
@@ -2042,6 +2302,9 @@ export function createTelegramService({
     }
     if (data === "story:c" || data === "story:d") {
       return { type: "commit" };
+    }
+    if (data === "story:rx") {
+      return { type: "removal_cancel" };
     }
     if (data === "story:x") {
       return { type: "cancel" };
