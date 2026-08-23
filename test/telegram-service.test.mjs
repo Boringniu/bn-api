@@ -1437,6 +1437,69 @@ test("admin private forward from the configured legacy channel is indexed then d
   );
 });
 
+test("re-forwarding an old channel video re-ingests its saved caption description", async () => {
+  const telegramCalls = [];
+  const ingestCalls = [];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        // The real ingest upsert keeps the existing media id and replaces an
+        // empty description with the forwarded channel caption.
+        return { id: "media_legacy_description", outcome: "updated", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: {} }) };
+    },
+  });
+  const db = new FakeD1();
+
+  const result = await service.handleUpdate(db, {
+    message: {
+      message_id: 13,
+      chat: { id: 111, type: "private" },
+      from: { id: 222 },
+      caption: "ADN-405 #剧情 #中文字幕\n\n旧视频重新转发后补齐的简介。\n第二行说明也会保留。",
+      video: { file_id: "PRIVATE-OLD", file_unique_id: "UNIQUE-OLD", file_name: "ADN-405.mp4" },
+      forward_origin: {
+        type: "channel",
+        chat: { id: -1004460339207 },
+        message_id: 405,
+      },
+    },
+  }, {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_ADMIN_IDS: "222",
+    TELEGRAM_CHANNEL_ID: "-1004460339207",
+  });
+
+  assert.equal(result.existing, true);
+  assert.equal(result.private_copy_deleted, true);
+  assert.equal(ingestCalls.length, 1);
+  assert.equal(ingestCalls[0].source.external_id, "-1004460339207:405");
+  assert.equal(ingestCalls[0].code, "ADN-405");
+  assert.equal(
+    ingestCalls[0].description,
+    "旧视频重新转发后补齐的简介。\n第二行说明也会保留。",
+  );
+  assert.ok(telegramCalls.some((call) =>
+    call.method === "sendMessage" && call.body.text.includes("已存在并更新 #ADN-405"),
+  ));
+  assert.ok(!telegramCalls.some((call) => call.body.chat_id === "-1004460339207"));
+  assert.ok(
+    db.statements.some((statement) =>
+      typeof statement.sql === "string" && statement.sql.includes("INSERT INTO channel_posts"),
+    ),
+  );
+});
+
 test("private forwarded media group inherits caption tags and removes every private copy", async () => {
   const telegramCalls = [];
   const ingestCalls = [];

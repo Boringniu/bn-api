@@ -112,6 +112,18 @@ test("reuses an existing media id and preserves terminal media status", async ()
   );
 });
 
+test("preserves an existing description when a re-forwarded payload has no description", async () => {
+  const db = new RecordingD1({ id: "media_existing_description", status: "approved" });
+  await service.ingest(db, knownPayload());
+
+  const upsert = findStatement(db, "INSERT INTO media (");
+  assert.match(
+    upsert.sql,
+    /description = COALESCE\(NULLIF\(trim\(excluded\.description\), ''\), media\.description\)/,
+  );
+  assert.equal(upsert.values[8], null);
+});
+
 test("creates new review records without reusing completed review ids", async () => {
   const firstDb = new RecordingD1();
   await service.ingest(firstDb, unknownPayload());
