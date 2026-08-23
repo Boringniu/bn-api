@@ -521,6 +521,7 @@ test("duplicates command is admin-only and only renders review candidates", asyn
     allResults: [
       [
         {
+          media_id: "media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           tg_file_unique_id: "same-file",
           normalized_code: "ADN-100",
           title: "候选标题 A",
@@ -528,6 +529,7 @@ test("duplicates command is admin-only and only renders review candidates", asyn
           tg_message_id: 17,
         },
         {
+          media_id: "media_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           tg_file_unique_id: "same-file",
           normalized_code: "ADN-100",
           title: "候选标题 B",
@@ -546,10 +548,76 @@ test("duplicates command is admin-only and only renders review candidates", asyn
   assert.ok(calls[1].body.text.includes("未执行合并或删除"));
   assert.ok(calls[1].body.text.includes("https://t.me/c/4460339207/17"));
   assert.ok(calls[1].body.text.includes("候选标题 A"));
+  assert.ok(calls[1].body.text.includes("/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRM"));
   assert.equal(
     adminDb.statements.filter((statement) => /^(INSERT|UPDATE|DELETE)/iu.test(statement.sql.trim())).length,
     0,
   );
+});
+
+test("delete command requires explicit confirmation and preserves records when Telegram deletion fails", async () => {
+  const calls = [];
+  const candidate = {
+    media_id: "media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    normalized_code: "ADN-100",
+    title: "候选标题",
+    updated_at: "2026-08-23T00:00:00Z",
+    tg_chat_id: "-1004460339207",
+    tg_message_id: 17,
+    tg_file_unique_id: "same-file",
+  };
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      const body = JSON.parse(init.body);
+      calls.push({ method, body });
+      const response = method === "deleteMessage"
+        ? { ok: true, result: true }
+        : { ok: true, result: { message_id: 1 } };
+      return { json: async () => response };
+    },
+  });
+  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" };
+
+  await service.handleUpdate(
+    new FakeD1(),
+    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+    env,
+  );
+  assert.ok(calls[0].body.text.includes("CONFIRM"));
+
+  const deleteDb = new FakeD1({ firstResults: [candidate] });
+  await service.handleUpdate(
+    deleteDb,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRM" } },
+    env,
+  );
+  assert.equal(calls.at(-2).method, "deleteMessage");
+  assert.deepEqual(calls.at(-2).body, { chat_id: "-1004460339207", message_id: 17 });
+  assert.ok(calls.at(-1).body.text.includes("已删除 #ADN-100"));
+  assert.ok(deleteDb.statements.some((statement) => statement.sql.includes("INSERT INTO duplicate_deletion_audit")));
+  assert.ok(deleteDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
+
+  const failedCalls = [];
+  const failingService = createService({
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      failedCalls.push({ method, body: JSON.parse(init.body) });
+      const response = method === "deleteMessage"
+        ? { ok: false, description: "message can't be deleted" }
+        : { ok: true, result: { message_id: 1 } };
+      return { json: async () => response };
+    },
+  });
+  const failedDb = new FakeD1({ firstResults: [candidate] });
+  await failingService.handleUpdate(
+    failedDb,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRM" } },
+    env,
+  );
+  assert.ok(failedCalls.at(-1).body.text.includes("索引记录已保留"));
+  assert.ok(failedDb.statements.some((statement) => statement.sql.includes("telegram_delete_failed")));
+  assert.ok(!failedDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
 });
 
 test("refresh command rejects non-admins and permits configured admins", async () => {
@@ -1234,6 +1302,7 @@ test("configures webhook to receive channel posts and channel edits", async () =
       { command: "stats", description: "查看收录统计" },
       { command: "index", description: "跳转频道索引" },
       { command: "duplicates", description: "查看重复候选（管理员）" },
+      { command: "delete", description: "删除重复候选（管理员）" },
       { command: "refresh", description: "刷新频道索引（管理员）" },
       { command: "about", description: "简介说明" },
     ],

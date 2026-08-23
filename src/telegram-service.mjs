@@ -148,7 +148,8 @@ export function createTelegramService({
         return null;
       }
 
-      const needsAdminCheck = ["/stats", "/duplicates", "/refresh"].includes(text);
+      const command = text.split(/\s+/u)[0].toLowerCase();
+      const needsAdminCheck = ["/stats", "/duplicates", "/delete", "/refresh"].includes(command);
       const isUserAdmin = needsAdminCheck
         ? await this.isAuthorizedAdmin(userId, env)
         : false;
@@ -174,6 +175,7 @@ export function createTelegramService({
           "/stats - 查看收录统计\n" +
           "/index - 浏览频道索引\n" +
           "/duplicates - 查看重复候选（管理员）\n" +
+          "/delete <媒体ID> CONFIRM - 删除重复候选（管理员）\n" +
           "/refresh - 刷新频道索引（管理员）";
       } else if (text === "/duplicates") {
         if (!isUserAdmin) {
@@ -181,6 +183,21 @@ export function createTelegramService({
         } else {
           const candidates = await this.listDuplicateCandidates(db);
           reply = formatDuplicateCandidates(candidates);
+        }
+      } else if (command === "/delete") {
+        if (!isUserAdmin) {
+          reply = "权限不足";
+        } else {
+          const deletion = parseDuplicateDeletionCommand(text);
+          if (!deletion) {
+            reply = "用法：/delete <媒体ID> CONFIRM\n仅能删除 /duplicates 中列出的重复候选；未执行此命令的记录会默认保留。";
+          } else {
+            const result = await this.deleteDuplicateCandidate(db, env, {
+              mediaId: deletion.mediaId,
+              deletedByUserId: userId,
+            });
+            reply = formatDuplicateDeletionResult(result);
+          }
         }
       } else if (text === "/refresh") {
         if (!isUserAdmin) {
@@ -667,6 +684,7 @@ export function createTelegramService({
           { command: "stats", description: "查看收录统计" },
           { command: "index", description: "跳转频道索引" },
           { command: "duplicates", description: "查看重复候选（管理员）" },
+          { command: "delete", description: "删除重复候选（管理员）" },
           { command: "refresh", description: "刷新频道索引（管理员）" },
           { command: "about", description: "简介说明" },
         ],
@@ -803,6 +821,101 @@ export function createTelegramService({
         `)
         .all();
       return groupRowsBy(result.results ?? [], "tg_file_unique_id");
+    },
+
+    async deleteDuplicateCandidate(db, env, { mediaId, deletedByUserId }) {
+      const candidate = await db
+        .prepare(`
+          SELECT
+            m.id AS media_id,
+            m.normalized_code,
+            m.title,
+            m.updated_at,
+            cp.tg_chat_id,
+            cp.tg_message_id,
+            mf.tg_file_unique_id
+          FROM media m
+          JOIN channel_posts cp ON cp.media_id = m.id
+          JOIN media_files mf ON mf.media_id = m.id
+          WHERE m.id = ?
+            AND m.status = 'approved'
+            AND mf.tg_file_unique_id IS NOT NULL
+            AND mf.tg_file_unique_id <> ''
+            AND EXISTS (
+              SELECT 1
+              FROM media_files sibling_file
+              JOIN media sibling_media ON sibling_media.id = sibling_file.media_id
+              WHERE sibling_file.tg_file_unique_id = mf.tg_file_unique_id
+                AND sibling_media.id <> m.id
+                AND sibling_media.status = 'approved'
+            )
+          LIMIT 1
+        `)
+        .bind(mediaId)
+        .first();
+      if (!candidate) {
+        return { outcome: "not_duplicate_candidate" };
+      }
+
+      const requestedAt = new Date().toISOString();
+      const auditToken = crypto.randomUUID();
+      const snapshot = JSON.stringify({
+        media_id: candidate.media_id,
+        normalized_code: candidate.normalized_code,
+        title: candidate.title,
+        updated_at: candidate.updated_at,
+        tg_chat_id: candidate.tg_chat_id,
+        tg_message_id: candidate.tg_message_id,
+        tg_file_unique_id: candidate.tg_file_unique_id,
+      });
+      await db
+        .prepare(`
+          INSERT INTO duplicate_deletion_audit (
+            audit_token, media_id, tg_chat_id, tg_message_id, tg_file_unique_id,
+            deleted_by_tg_user_id, snapshot_json, outcome, requested_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        `)
+        .bind(
+          auditToken,
+          candidate.media_id,
+          candidate.tg_chat_id,
+          candidate.tg_message_id,
+          candidate.tg_file_unique_id,
+          deletedByUserId,
+          snapshot,
+          requestedAt,
+        )
+        .run();
+
+      try {
+        await this.callTelegram(env, "deleteMessage", {
+          chat_id: candidate.tg_chat_id,
+          message_id: candidate.tg_message_id,
+        });
+      } catch (error) {
+        await db
+          .prepare(`
+            UPDATE duplicate_deletion_audit
+            SET outcome = 'telegram_delete_failed', error_message = ?
+            WHERE audit_token = ?
+          `)
+          .bind(String(error.message), auditToken)
+          .run();
+        return { outcome: "telegram_delete_failed", candidate };
+      }
+
+      const completedAt = new Date().toISOString();
+      await db.batch([
+        db.prepare("DELETE FROM media WHERE id = ?").bind(candidate.media_id),
+        db
+          .prepare(`
+            UPDATE duplicate_deletion_audit
+            SET outcome = 'completed', telegram_deleted_at = ?, catalog_deleted_at = ?
+            WHERE audit_token = ?
+          `)
+          .bind(completedAt, completedAt, auditToken),
+      ]);
+      return { outcome: "completed", candidate };
     },
 
     async refreshPinnedIndex(db, env) {
@@ -1264,9 +1377,28 @@ function formatDuplicateCandidates(groups) {
         : escapeHtml(code);
       const title = row.title ? ` · ${escapeHtml(row.title)}` : "";
       lines.push(`• ${heading}${title}`);
+      lines.push(`<code>/delete ${escapeHtml(row.media_id)} CONFIRM</code>`);
     }
   }
   return lines.join("\n");
+}
+
+function parseDuplicateDeletionCommand(text) {
+  const match = /^\/delete\s+(media_[a-f0-9]{32})\s+confirm$/iu.exec(text.trim());
+  return match ? { mediaId: match[1].toLowerCase() } : null;
+}
+
+function formatDuplicateDeletionResult(result) {
+  if (result.outcome === "not_duplicate_candidate") {
+    return "未删除：该媒体已不属于重复候选，或已被处理。";
+  }
+  const code = result.candidate?.normalized_code
+    ? `#${escapeHtml(result.candidate.normalized_code)}`
+    : "该媒体";
+  if (result.outcome === "telegram_delete_failed") {
+    return `未删除 ${code}：频道消息删除失败，索引记录已保留。`;
+  }
+  return `✅ 已删除 ${code} 的频道消息与索引记录，并已写入删除审计。`;
 }
 
 function formatCatalogStats(stats, { includeAdmin }) {
