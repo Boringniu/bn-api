@@ -6,6 +6,7 @@ const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
 const INDEX_ITEMS_PER_BLOCK = 24;
 const BOT_DESCRIPTION_LIMIT = 240;
+const STORY_BATCH_CODE_LIMIT = 20;
 const STORY_LIST_COMMANDS = new Set(["/系列剧情", "系列剧情", "/stories"]);
 const STORY_CREATE_COMMANDS = new Set(["/新增剧情", "新增剧情", "/newstory"]);
 const STORY_BROWSE_KEYBOARD = Object.freeze({
@@ -454,7 +455,7 @@ export function createTelegramService({
             reply = "当前剧情条目已不存在，已结束选片。";
           } else {
             await storyService.setMediaQuery(db, { userId, query: text, page: 1 });
-            const search = await resolveDirectorySearch(db, text, 1);
+            const search = await resolveStorySelectionSearch(db, text, 1);
             const selectedMediaIds = await storyService.listSelectedMediaIds(db, userId);
             reply = formatStorySelectionReply(story, {
               query: text,
@@ -1608,6 +1609,64 @@ export function createTelegramService({
     };
   }
 
+  async function resolveStorySelectionSearch(db, query, page) {
+    const rawCodes = splitStoryCodeQueries(query);
+    if (rawCodes.length < 2) {
+      return resolveDirectorySearch(db, query, page);
+    }
+    const lookups = rawCodes.map((rawCode) => {
+      const { resolution } = searchService.resolveQuery(rawCode);
+      return resolution?.type === "code" ? { rawCode, resolution } : null;
+    });
+    if (lookups.some((lookup) => !lookup)) {
+      return resolveDirectorySearch(db, query, page);
+    }
+    const matched = await Promise.all(lookups.map(async ({ rawCode, resolution }) => ({
+      rawCode,
+      resolution,
+      result: await findDirectoryMedia(db, resolution, 1),
+    })));
+    const results = [];
+    const seenMedia = new Set();
+    const unmatchedCodes = [];
+    for (const entry of matched) {
+      if (entry.result.total === 0) {
+        unmatchedCodes.push(entry.resolution.code ?? entry.rawCode);
+        continue;
+      }
+      for (const media of entry.result.results) {
+        if (!seenMedia.has(media.id)) {
+          seenMedia.add(media.id);
+          results.push(media);
+        }
+      }
+    }
+    return {
+      resolution: {
+        type: "batch_codes",
+        codes: matched.map((entry) => entry.resolution.code ?? entry.rawCode),
+        unmatched_codes: unmatchedCodes,
+      },
+      result: {
+        page: 1,
+        page_size: Math.max(results.length, 1),
+        total: results.length,
+        results,
+      },
+    };
+  }
+
+  function splitStoryCodeQueries(query) {
+    if (typeof query !== "string") {
+      return [];
+    }
+    const parts = query
+      .split(/[，,；;\s]+/u)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    return [...new Set(parts)].slice(0, STORY_BATCH_CODE_LIMIT);
+  }
+
   async function resolveDirectorySearch(db, query, page) {
     const rawTag = parseRawTagQuery(query);
     if (rawTag) {
@@ -1751,7 +1810,7 @@ export function createTelegramService({
         answerCallback,
       });
     }
-    const search = await resolveDirectorySearch(db, session.query, page);
+    const search = await resolveStorySelectionSearch(db, session.query, page);
     const selectedMediaIds = await activeStoryService.listSelectedMediaIds(db, userId);
     return editStoryMessage(telegramService, env, callback, {
       text: formatStorySelectionReply(story, {
@@ -1783,7 +1842,7 @@ export function createTelegramService({
   }
 
   function formatStoryManagementPrompt(story) {
-    return `<b>正在管理：</b>${escapeHtml(story.title)}【${story.video_count}】\n\n可直接转发当前频道中的视频到这里，Bot 会自动加入本次已选；也可输入番号、番号前缀、演员名或 #话题筛选。可一次勾选多部视频，最后点击“加入已选视频”统一关联。`;
+    return `<b>正在管理：</b>${escapeHtml(story.title)}【${story.video_count}】\n\n可直接转发当前频道中的视频到这里，Bot 会自动加入本次已选；也可输入番号、番号前缀、演员名或 #话题筛选。多个番号可用逗号、空格或换行一次粘贴，例如：ADN-405, ADN-415, ADN-442。可一次勾选多部视频，最后点击“加入已选视频”统一关联。`;
   }
 
   function formatStoryMediaPage(story, page, renderResults) {
@@ -1801,7 +1860,19 @@ export function createTelegramService({
     selectedCount = 0,
   }) {
     const heading = `<b>为“${escapeHtml(story.title)}”选择视频</b>\n已选 ${selectedCount} 部`;
-    return `${heading}\n\n${renderSearchReply({ query, resolution, searchResult })}`;
+    if (resolution?.type !== "batch_codes") {
+      return `${heading}\n\n${renderSearchReply({ query, resolution, searchResult })}`;
+    }
+    const requested = resolution.codes.length;
+    const matched = searchResult.results.length;
+    const lines = [`${heading}\n已匹配 ${matched}/${requested} 部`];
+    if (searchResult.results.length > 0) {
+      lines.push("", ...searchResult.results.map((media, index) => renderDirectoryEntry(media, index + 1)));
+    }
+    if (resolution.unmatched_codes.length > 0) {
+      lines.push("", `未找到：${escapeHtml(resolution.unmatched_codes.join("、"))}`);
+    }
+    return lines.join("\n");
   }
 
   function buildStoryListMarkup(page) {

@@ -1152,6 +1152,61 @@ test("admin story selection supports multiple checked videos before one batch ad
   assert.ok(!db.statements.some((statement) => statement.sql.includes("story_series_media")));
 });
 
+test("story selection resolves comma-separated codes into one multi-select result", async () => {
+  const calls = [];
+  const story = {
+    id: "story_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    title: "批量选片剧情",
+    video_count: 0,
+  };
+  const session = { mode: "awaiting_media_query", story_id: story.id, query: null, page: 1 };
+  const catalog = new Map([
+    ["ADN-405", { ...sampleMedia, id: "media_11111111111111111111111111111111", code: "ADN-405" }],
+    ["ADN-415", { ...sampleMedia, id: "media_22222222222222222222222222222222", code: "ADN-415" }],
+    ["ADN-442", { ...sampleMedia, id: "media_33333333333333333333333333333333", code: "ADN-442" }],
+  ]);
+  const searchService = {
+    resolveQuery(query) {
+      return { query, resolution: { type: "code", code: query.toUpperCase() } };
+    },
+    async findMedia(_db, options) {
+      const media = catalog.get(options.filters.code);
+      return { page: 1, page_size: 10, total: media ? 1 : 0, results: media ? [media] : [] };
+    },
+  };
+  const storyService = {
+    async getSession() { return session; },
+    async getStory() { return story; },
+    async setMediaQuery(_db, input) { session.query = input.query; return session; },
+    async listSelectedMediaIds() { return []; },
+  };
+  const service = createService({
+    searchService,
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+
+  await service.handleUpdate(new FakeD1(), {
+    message: {
+      chat: { id: 111, type: "private" },
+      from: { id: 222 },
+      text: "ADN-405, ADN-415\nADN-442，ADN-999",
+    },
+  }, { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" });
+
+  assert.ok(calls[0].body.text.includes("已匹配 3/4 部"));
+  assert.ok(calls[0].body.text.includes("未找到：ADN-999"));
+  assert.deepEqual(calls[0].body.reply_markup.inline_keyboard.slice(0, 3).map((row) => row[0].text), [
+    "□ 选择 · #ADN-405",
+    "□ 选择 · #ADN-415",
+    "□ 选择 · #ADN-442",
+  ]);
+  assert.equal(calls[0].body.reply_markup.inline_keyboard.at(-2)[0].text, "加入已选视频（0）");
+});
+
 test("admin story selection commits all checked videos in one operation", async () => {
   const calls = [];
   const story = {
