@@ -2028,16 +2028,8 @@ export function createTelegramService({
     });
   }
 
-  function formatStoryList(page) {
-    if (page.total === 0) {
-      return "📚 <b>系列剧情</b>\n\n暂未创建系列剧情。";
-    }
-    const offset = (page.page - 1) * page.page_size;
-    const lines = ["📚 <b>系列剧情</b>", "点击条目查看该剧情下的视频。", ""];
-    for (const [index, story] of page.results.entries()) {
-      lines.push(`${offset + index + 1} • ${escapeHtml(story.title)}【${story.video_count}】`);
-    }
-    return lines.join("\n");
+  function formatStoryList() {
+    return "📚 <b>系列剧情</b>";
   }
 
   function formatStoryCreated({ story, created }) {
