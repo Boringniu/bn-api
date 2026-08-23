@@ -1272,6 +1272,41 @@ test("story media removal requires a second confirmation and does not delete med
   assert.ok(calls[3].body.text.includes("频道视频与媒体目录未删除"));
 });
 
+test("story management page submits the current multi-selection through the active commit callback", async () => {
+  const calls = [];
+  const story = {
+    id: "story_dededededededededededededededede",
+    title: "批量提交剧情",
+    video_count: 2,
+  };
+  const storyService = {
+    async startMediaSelection() { return story; },
+  };
+  const service = createService({
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+
+  await service.handleUpdate(new FakeD1(), {
+    callback_query: {
+      id: "story-manage-commit",
+      data: `story:m:${story.id}`,
+      from: { id: 222 },
+      message: { message_id: 89, chat: { id: 111, type: "private" } },
+    },
+  }, { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" });
+
+  assert.equal(calls[0].method, "answerCallbackQuery");
+  assert.equal(calls[1].method, "sendMessage");
+  assert.deepEqual(calls[1].body.reply_markup.inline_keyboard[1], [
+    { text: "加入已选视频", callback_data: "story:c" },
+    { text: "取消", callback_data: "story:x" },
+  ]);
+});
+
 test("admin story selection supports multiple checked videos before one batch add", async () => {
   const calls = [];
   const story = {

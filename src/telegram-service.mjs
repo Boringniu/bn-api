@@ -2141,7 +2141,7 @@ export function createTelegramService({
     return {
       inline_keyboard: [
         [{ text: "查看该剧情", callback_data: encodeStoryCallback("view", story.id, 1) }],
-        [{ text: "完成", callback_data: encodeStoryCallback("done") }, { text: "取消", callback_data: encodeStoryCallback("cancel") }],
+        [{ text: "加入已选视频", callback_data: encodeStoryCallback("commit") }, { text: "取消", callback_data: encodeStoryCallback("cancel") }],
       ],
     };
   }

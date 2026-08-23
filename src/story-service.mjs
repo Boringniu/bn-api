@@ -1,6 +1,5 @@
 import { normalizeValue } from "./value-normalizer.mjs";
 
-const APPROVED_STATUS = "approved";
 
 export function createStoryService({ searchService }) {
   if (!searchService || typeof searchService.getMedia !== "function") {
@@ -111,20 +110,23 @@ export function createStoryService({ searchService }) {
           `SELECT ssm.media_id
            FROM story_series_media ssm
            JOIN media m ON m.id = ssm.media_id
-           WHERE ssm.story_id = ? AND m.status = ?
+           WHERE ssm.story_id = ? AND m.status IN ('approved', 'pending')
            ORDER BY ssm.added_at DESC, ssm.media_id
            LIMIT ? OFFSET ?`,
-        ).bind(storyId, APPROVED_STATUS, size, offset),
+        ).bind(storyId, size, offset),
         db.prepare(
           `SELECT COUNT(*) AS total
            FROM story_series_media ssm
            JOIN media m ON m.id = ssm.media_id
-           WHERE ssm.story_id = ? AND m.status = ?`,
-        ).bind(storyId, APPROVED_STATUS),
+           WHERE ssm.story_id = ? AND m.status IN ('approved', 'pending')`,
+        ).bind(storyId),
       ]);
       const ids = (listResult.results ?? []).map((row) => row.media_id);
       const loaded = await Promise.all(
-        ids.map((mediaId) => searchService.getMedia(db, mediaId, { includeChannelLinks: true })),
+        ids.map((mediaId) => searchService.getMedia(db, mediaId, {
+          includeChannelLinks: true,
+          includePending: true,
+        })),
       );
       return {
         page: currentPage,
@@ -205,7 +207,10 @@ export function createStoryService({ searchService }) {
       if (!session || session.mode !== "awaiting_media_query" || !isMediaId(mediaId)) {
         return { outcome: "no_active_story", selected_count: 0 };
       }
-      const media = await searchService.getMedia(db, mediaId, { includeChannelLinks: true });
+      const media = await searchService.getMedia(db, mediaId, {
+        includeChannelLinks: true,
+        includePending: true,
+      });
       if (!media) {
         return { outcome: "media_not_found", selected_count: session.selected_count };
       }
@@ -230,7 +235,10 @@ export function createStoryService({ searchService }) {
       if (!session || session.mode !== "awaiting_media_query" || !isMediaId(mediaId)) {
         return { outcome: "no_active_story", selected_count: 0 };
       }
-      const media = await searchService.getMedia(db, mediaId, { includeChannelLinks: true });
+      const media = await searchService.getMedia(db, mediaId, {
+        includeChannelLinks: true,
+        includePending: true,
+      });
       if (!media) {
         return { outcome: "media_not_found", selected_count: session.selected_count };
       }
@@ -284,10 +292,10 @@ export function createStoryService({ searchService }) {
           `SELECT sm.media_id
            FROM story_series_session_media sm
            JOIN media m ON m.id = sm.media_id
-           WHERE sm.tg_user_id = ? AND m.status = ?
+           WHERE sm.tg_user_id = ? AND m.status IN ('approved', 'pending')
            ORDER BY sm.selected_at, sm.media_id`,
         )
-        .bind(normalizeUserId(userId), APPROVED_STATUS)
+        .bind(normalizeUserId(userId))
         .all();
       const mediaIds = (selected.results ?? []).map((row) => row.media_id);
       if (mediaIds.length === 0) {
@@ -400,7 +408,10 @@ export function createStoryService({ searchService }) {
       if (!relation) {
         return { outcome: "story_media_not_found" };
       }
-      const media = await searchService.getMedia(db, mediaId, { includeChannelLinks: true });
+      const media = await searchService.getMedia(db, mediaId, {
+        includeChannelLinks: true,
+        includePending: true,
+      });
       const now = new Date().toISOString();
       await writeStoryAudit(db, {
         operation: "remove_story_media",

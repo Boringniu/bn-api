@@ -150,7 +150,7 @@ export function createSearchService({
       };
     },
 
-    async getMedia(db, mediaId, { includeChannelLinks = false } = {}) {
+    async getMedia(db, mediaId, { includeChannelLinks = false, includePending = false } = {}) {
       assertDatabase(db);
       const channelColumns = includeChannelLinks
         ? ", cp.tg_chat_id AS channel_chat_id, cp.tg_message_id AS channel_message_id"
@@ -163,7 +163,7 @@ export function createSearchService({
           `SELECT ${PUBLIC_MEDIA_COLUMNS}${channelColumns}
            FROM media m
            ${channelJoin}
-           WHERE m.id = ? AND m.status = 'approved'
+           WHERE m.id = ? AND m.status ${includePending ? "IN ('approved', 'pending')" : "= 'approved'"}
            LIMIT 1`,
         )
         .bind(mediaId)

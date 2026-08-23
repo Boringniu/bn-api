@@ -148,11 +148,18 @@ test("findMedia stops paging at the configured result ceiling", async () => {
   assert.equal(db.statements.length, 0);
 });
 
-test("getMedia returns null for missing or unapproved media", async () => {
+test("getMedia returns null for missing or unapproved media by default", async () => {
   const db = new FakeD1();
   const media = await service.getMedia(db, "media_missing");
   assert.equal(media, null);
   assert.match(db.statements[0].sql, /m\.status = 'approved'/);
+});
+
+test("getMedia allows a story-only caller to retrieve a pending media record", async () => {
+  const db = new FakeD1();
+  const media = await service.getMedia(db, "media_pending", { includePending: true });
+  assert.equal(media, null);
+  assert.match(db.statements[0].sql, /m\.status IN \('approved', 'pending'\)/);
 });
 
 class FakeD1 {
