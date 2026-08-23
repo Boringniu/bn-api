@@ -444,7 +444,112 @@ test("about command explains the direct query workflow", async () => {
 
   assert.equal(calls[0].method, "sendMessage");
   assert.ok(calls[0].body.text.includes("BN·media"));
-  assert.ok(calls[0].body.text.includes("ADN、白雪"));
+  assert.ok(calls[0].body.text.includes("ADN-100、ADN、白雪、#剧情"));
+  assert.ok(calls[0].body.text.includes("/stats - 查看收录统计"));
+});
+
+test("stats command shows public catalog totals and admin quality metrics", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+  const publicDb = new FakeD1({
+    batchResults: [
+      [
+        {
+          media_count: 65,
+          code_count: 58,
+          latest_updated_at: "2026-08-23T03:51:38.744Z",
+        },
+      ],
+      [{ file_count: 61 }],
+    ],
+  });
+  await service.handleUpdate(
+    publicDb,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/stats" } },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+  assert.ok(calls[0].body.text.includes("已审核媒体：65 条"));
+  assert.ok(calls[0].body.text.includes("不同编号：58 个"));
+  assert.ok(calls[0].body.text.includes("不同文件：61 个"));
+  assert.ok(!calls[0].body.text.includes("管理员数据质量"));
+
+  const adminDb = new FakeD1({
+    batchResults: [
+      [
+        {
+          media_count: 65,
+          code_count: 58,
+          latest_updated_at: "2026-08-23T03:51:38.744Z",
+        },
+      ],
+      [{ file_count: 61 }],
+      [{ pending_review_count: 0 }],
+      [{ duplicate_file_group_count: 4, duplicate_media_count: 8 }],
+    ],
+  });
+  await service.handleUpdate(
+    adminDb,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/stats" } },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" },
+  );
+  assert.ok(calls[1].body.text.includes("管理员数据质量"));
+  assert.ok(calls[1].body.text.includes("待审核：0 条"));
+  assert.ok(calls[1].body.text.includes("重复候选：4 组 / 8 条"));
+});
+
+test("duplicates command is admin-only and only renders review candidates", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+  await service.handleUpdate(
+    new FakeD1(),
+    { message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/duplicates" } },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" },
+  );
+  assert.equal(calls[0].body.text, "权限不足");
+
+  const adminDb = new FakeD1({
+    allResults: [
+      [
+        {
+          tg_file_unique_id: "same-file",
+          normalized_code: "ADN-100",
+          title: "候选标题 A",
+          tg_chat_id: "-1004460339207",
+          tg_message_id: 17,
+        },
+        {
+          tg_file_unique_id: "same-file",
+          normalized_code: "ADN-100",
+          title: "候选标题 B",
+          tg_chat_id: "-1004460339207",
+          tg_message_id: 18,
+        },
+      ],
+    ],
+  });
+  await service.handleUpdate(
+    adminDb,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/duplicates" } },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" },
+  );
+  assert.ok(calls[1].body.text.includes("重复候选"));
+  assert.ok(calls[1].body.text.includes("未执行合并或删除"));
+  assert.ok(calls[1].body.text.includes("https://t.me/c/4460339207/17"));
+  assert.ok(calls[1].body.text.includes("候选标题 A"));
+  assert.equal(
+    adminDb.statements.filter((statement) => /^(INSERT|UPDATE|DELETE)/iu.test(statement.sql.trim())).length,
+    0,
+  );
 });
 
 test("refresh command rejects non-admins and permits configured admins", async () => {
@@ -523,7 +628,36 @@ test("private bot gives a specific message for recognized but uncollected search
     { TELEGRAM_BOT_TOKEN: "bot-token" },
   );
 
-  assert.equal(telegramCalls[0].body.text, "暂未收录 #ADN。");
+  assert.equal(
+    telegramCalls[0].body.text,
+    "暂未收录 #ADN。\n请检查番号格式，或只输入前缀后重试。",
+  );
+});
+
+test("private bot gives examples for unrecognized searches", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+
+  await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        text: "不存在的查询",
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  assert.ok(calls[0].body.text.includes("番号或前缀：ADN-100、ADN"));
+  assert.ok(calls[0].body.text.includes("话题：#剧情"));
+  assert.ok(calls[0].body.text.includes("/index 浏览已收录索引"));
 });
 
 test("private bot adds next-page navigation and edits the result on callback", async () => {
@@ -1046,7 +1180,9 @@ test("configures webhook to receive channel posts and channel edits", async () =
   assert.ok(telegramCalls[0].url.includes("/setWebhook"));
   assert.deepEqual(telegramCalls[1].body, {
     commands: [
+      { command: "stats", description: "查看收录统计" },
       { command: "index", description: "跳转频道索引" },
+      { command: "duplicates", description: "查看重复候选（管理员）" },
       { command: "refresh", description: "刷新频道索引（管理员）" },
       { command: "about", description: "简介说明" },
     ],

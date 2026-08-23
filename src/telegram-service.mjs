@@ -150,7 +150,10 @@ export function createTelegramService({
 
       let reply;
       let replyMarkup = null;
-      if (text === "/index") {
+      if (text === "/stats") {
+        const stats = await this.getCatalogStats(db, { includeAdmin: isUserAdmin });
+        reply = formatCatalogStats(stats, { includeAdmin: isUserAdmin });
+      } else if (text === "/index") {
         const [indexMessageId] = await readIndexMessageIds(db);
         const indexUrl = channelMessageUrl(
           env.TELEGRAM_CHANNEL_ID,
@@ -162,10 +165,19 @@ export function createTelegramService({
       } else if (text === "/about" || text === "/start" || text === "/help") {
         reply =
           "BN·media\n\n" +
-          "直接输入番号前缀或女优名即可查询。\n" +
-          "例如：ADN、白雪\n\n" +
-          "/index - 跳转频道索引\n" +
+          "可直接输入：番号、番号前缀、演员名或 #话题。\n" +
+          "例如：ADN-100、ADN、白雪、#剧情\n\n" +
+          "/stats - 查看收录统计\n" +
+          "/index - 浏览频道索引\n" +
+          "/duplicates - 查看重复候选（管理员）\n" +
           "/refresh - 刷新频道索引（管理员）";
+      } else if (text === "/duplicates") {
+        if (!isUserAdmin) {
+          reply = "权限不足";
+        } else {
+          const candidates = await this.listDuplicateCandidates(db);
+          reply = formatDuplicateCandidates(candidates);
+        }
       } else if (text === "/refresh") {
         if (!isUserAdmin) {
           reply = "权限不足";
@@ -648,7 +660,9 @@ export function createTelegramService({
       });
       await this.callTelegram(env, "setMyCommands", {
         commands: [
+          { command: "stats", description: "查看收录统计" },
           { command: "index", description: "跳转频道索引" },
+          { command: "duplicates", description: "查看重复候选（管理员）" },
           { command: "refresh", description: "刷新频道索引（管理员）" },
           { command: "about", description: "简介说明" },
         ],
@@ -674,6 +688,94 @@ export function createTelegramService({
         pending_update_count: info.pending_update_count ?? 0,
         channel_member: channelMember,
       };
+    },
+
+    async getCatalogStats(db, { includeAdmin = false } = {}) {
+      const statements = [
+        db.prepare(`
+          SELECT
+            COUNT(*) AS media_count,
+            COUNT(DISTINCT normalized_code) AS code_count,
+            MAX(updated_at) AS latest_updated_at
+          FROM media
+          WHERE status = 'approved'
+        `),
+        db.prepare(`
+          SELECT COUNT(DISTINCT mf.tg_file_unique_id) AS file_count
+          FROM media_files mf
+          JOIN media m ON m.id = mf.media_id
+          WHERE m.status = 'approved'
+            AND mf.tg_file_unique_id IS NOT NULL
+            AND mf.tg_file_unique_id <> ''
+        `),
+      ];
+      if (includeAdmin) {
+        statements.push(
+          db.prepare(`
+            SELECT COUNT(*) AS pending_review_count
+            FROM review_items
+            WHERE status = 'pending'
+          `),
+          db.prepare(`
+            SELECT
+              COUNT(*) AS duplicate_file_group_count,
+              COALESCE(SUM(media_count), 0) AS duplicate_media_count
+            FROM (
+              SELECT mf.tg_file_unique_id, COUNT(DISTINCT mf.media_id) AS media_count
+              FROM media_files mf
+              JOIN media m ON m.id = mf.media_id
+              WHERE m.status = 'approved'
+                AND mf.tg_file_unique_id IS NOT NULL
+                AND mf.tg_file_unique_id <> ''
+              GROUP BY mf.tg_file_unique_id
+              HAVING COUNT(DISTINCT mf.media_id) > 1
+            )
+          `),
+        );
+      }
+      const results = await db.batch(statements);
+      const catalog = results[0]?.results?.[0] ?? {};
+      const files = results[1]?.results?.[0] ?? {};
+      const pending = results[2]?.results?.[0] ?? {};
+      const duplicates = results[3]?.results?.[0] ?? {};
+      return {
+        media_count: Number(catalog.media_count ?? 0),
+        code_count: Number(catalog.code_count ?? 0),
+        file_count: Number(files.file_count ?? 0),
+        latest_updated_at: catalog.latest_updated_at ?? null,
+        pending_review_count: Number(pending.pending_review_count ?? 0),
+        duplicate_file_group_count: Number(duplicates.duplicate_file_group_count ?? 0),
+        duplicate_media_count: Number(duplicates.duplicate_media_count ?? 0),
+      };
+    },
+
+    async listDuplicateCandidates(db) {
+      const result = await db
+        .prepare(`
+          WITH duplicate_files AS (
+            SELECT tg_file_unique_id
+            FROM media_files
+            WHERE tg_file_unique_id IS NOT NULL AND tg_file_unique_id <> ''
+            GROUP BY tg_file_unique_id
+            HAVING COUNT(DISTINCT media_id) > 1
+          )
+          SELECT
+            m.id AS media_id,
+            m.normalized_code,
+            m.title,
+            m.updated_at,
+            cp.tg_chat_id,
+            cp.tg_message_id,
+            mf.tg_file_unique_id
+          FROM duplicate_files df
+          JOIN media_files mf ON mf.tg_file_unique_id = df.tg_file_unique_id
+          JOIN media m ON m.id = mf.media_id
+          LEFT JOIN channel_posts cp ON cp.media_id = m.id
+          WHERE m.status = 'approved'
+          ORDER BY mf.tg_file_unique_id, m.updated_at DESC
+        `)
+        .all();
+      return groupRowsBy(result.results ?? [], "tg_file_unique_id");
     },
 
     async refreshPinnedIndex(db, env) {
@@ -1020,13 +1122,23 @@ export function createTelegramService({
 
   function renderSearchReply({ query, resolution, searchResult }) {
     if (!["code", "code_prefix", "actor", "tag", "raw_tag"].includes(resolution?.type)) {
-      return `未识别“${escapeHtml(query)}”。请输入番号前缀（如 ADN）或 #话题。`;
+      return (
+        `未识别“${escapeHtml(query)}”。\n\n` +
+        "可以这样查询：\n" +
+        "• 番号或前缀：ADN-100、ADN\n" +
+        "• 演员或别名：白雪\n" +
+        "• 话题：#剧情\n\n" +
+        "也可发送 /index 浏览已收录索引。"
+      );
     }
     if (searchResult.total === 0) {
       const subject = ["actor", "tag", "raw_tag"].includes(resolution.type)
         ? `#${resolution.display_name ?? resolution.raw_tag ?? query.replace(/^#/u, "")}`
         : `#${resolution.code ?? resolution.prefix ?? query}`;
-      return `暂未收录 ${escapeHtml(subject)}。`;
+      const hint = ["code", "code_prefix"].includes(resolution.type)
+        ? "请检查番号格式，或只输入前缀后重试。"
+        : "可发送 /index 浏览已收录演员和话题，或尝试别名。";
+      return `暂未收录 ${escapeHtml(subject)}。\n${hint}`;
     }
     const offset = (searchResult.page - 1) * searchResult.page_size;
     return searchResult.results
@@ -1094,6 +1206,77 @@ export function createTelegramService({
     .filter(Boolean)
     .map((tag) => linkEntry(`#${tag}`));
   return `${index} • ${[linkEntry(code), ...tagEntries].join("  ")}`;
+}
+
+function groupRowsBy(rows, key) {
+  const groups = new Map();
+  for (const row of rows) {
+    const value = row[key];
+    const entries = groups.get(value) ?? [];
+    entries.push(row);
+    groups.set(value, entries);
+  }
+  return groups;
+}
+
+function formatDuplicateCandidates(groups) {
+  if (groups.size === 0) {
+    return "✅ 未发现重复 Telegram 文件候选。";
+  }
+  const lines = [
+    "🔎 <b>重复候选</b>",
+    "以下记录复用了同一 Telegram 文件；仅供核对，未执行合并或删除。",
+  ];
+  for (const [index, rows] of [...groups.values()].entries()) {
+    lines.push("", `<b>候选 ${index + 1}</b> · ${rows.length} 条`);
+    for (const row of rows) {
+      const code = row.normalized_code ? `#${row.normalized_code}` : "#未知编号";
+      const channelUrl = channelMessageUrl(row.tg_chat_id, row.tg_message_id);
+      const heading = channelUrl
+        ? `<a href="${escapeHtml(channelUrl)}">${escapeHtml(code)}</a>`
+        : escapeHtml(code);
+      const title = row.title ? ` · ${escapeHtml(row.title)}` : "";
+      lines.push(`• ${heading}${title}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatCatalogStats(stats, { includeAdmin }) {
+  const lines = [
+    "📊 <b>收录统计</b>",
+    "",
+    `已审核媒体：${stats.media_count} 条`,
+    `不同编号：${stats.code_count} 个`,
+    `不同文件：${stats.file_count} 个`,
+  ];
+  if (stats.latest_updated_at) {
+    lines.push(`最近更新：${formatShanghaiTime(stats.latest_updated_at)}`);
+  }
+  if (includeAdmin) {
+    lines.push("", "<b>管理员数据质量</b>");
+    lines.push(`待审核：${stats.pending_review_count} 条`);
+    lines.push(
+      `重复候选：${stats.duplicate_file_group_count} 组 / ${stats.duplicate_media_count} 条`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function formatShanghaiTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "暂无";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function parseRawTagQuery(query) {
