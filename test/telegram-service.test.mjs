@@ -555,6 +555,12 @@ test("duplicates command is admin-only and only renders review candidates", asyn
   assert.ok(calls[1].body.text.includes("当前频道：删除消息与目录"));
   assert.ok(calls[1].body.text.includes("旧频道遗留：仅删除目录"));
   assert.ok(calls[1].body.text.includes("/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRM"));
+  assert.deepEqual(calls[1].body.reply_markup, {
+    inline_keyboard: [
+      [{ text: "删除 #ADN-100", callback_data: "dupdel:d:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }],
+      [{ text: "删除 #ADN-100", callback_data: "dupdel:d:media_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }],
+    ],
+  });
   assert.equal(
     adminDb.statements.filter((statement) => /^(INSERT|UPDATE|DELETE)/iu.test(statement.sql.trim())).length,
     0,
@@ -655,6 +661,78 @@ test("delete command requires explicit confirmation and preserves records when T
   assert.ok(legacyCalls.at(-1).body.text.includes("旧频道遗留目录记录"));
   assert.ok(legacyDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
   assert.ok(legacyDb.statements.some((statement) => statement.sql.includes("legacy_catalog_only")));
+});
+
+test("duplicate deletion buttons require an explicit second confirmation", async () => {
+  const calls = [];
+  const candidate = {
+    media_id: "media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    normalized_code: "ADN-100",
+    title: "候选标题",
+    updated_at: "2026-08-23T00:00:00Z",
+    tg_chat_id: "-1004460339207",
+    tg_message_id: 17,
+    tg_file_unique_id: "same-file",
+  };
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      calls.push({ method, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 91 } }) };
+    },
+  });
+  const env = {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_ADMIN_IDS: "2002",
+    TELEGRAM_CHANNEL_ID: "-1004460339207",
+  };
+  const candidateDb = new FakeD1({ firstResults: [candidate] });
+  const baseCallback = {
+    from: { id: 2002 },
+    message: { message_id: 90, chat: { id: 111, type: "private" } },
+  };
+
+  await service.handleUpdate(
+    candidateDb,
+    {
+      callback_query: {
+        ...baseCallback,
+        id: "duplicate-delete-1",
+        data: "dupdel:d:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    },
+    env,
+  );
+  assert.deepEqual(calls.map((call) => call.method), ["answerCallbackQuery", "sendMessage"]);
+  assert.match(calls[1].body.text, /确认删除 #ADN-100/);
+  assert.deepEqual(calls[1].body.reply_markup, {
+    inline_keyboard: [[
+      { text: "确认删除此条", callback_data: "dupdel:c:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      { text: "取消", callback_data: "dupdel:x:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    ]],
+  });
+  assert.ok(!candidateDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
+
+  const confirmDb = new FakeD1({ firstResults: [candidate] });
+  await service.handleUpdate(
+    confirmDb,
+    {
+      callback_query: {
+        ...baseCallback,
+        id: "duplicate-confirm-1",
+        data: "dupdel:c:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    },
+    env,
+  );
+  assert.deepEqual(calls.slice(2).map((call) => call.method), [
+    "deleteMessage",
+    "answerCallbackQuery",
+    "editMessageText",
+  ]);
+  assert.deepEqual(calls[2].body, { chat_id: "-1004460339207", message_id: 17 });
+  assert.ok(confirmDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
+  assert.match(calls.at(-1).body.text, /已删除 #ADN-100/);
 });
 
 test("refresh command rejects non-admins and permits configured admins", async () => {

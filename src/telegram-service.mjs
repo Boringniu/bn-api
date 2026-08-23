@@ -129,6 +129,15 @@ export function createTelegramService({
         return this.handleEditedChannelPost(db, update.edited_channel_post, env);
       }
       if (update?.callback_query) {
+        const duplicateAction = decodeDuplicateDeletionCallback(update.callback_query.data);
+        if (duplicateAction) {
+          return this.handleDuplicateDeletionCallback(
+            db,
+            update.callback_query,
+            env,
+            duplicateAction,
+          );
+        }
         return this.handleSearchNavigation(db, update.callback_query, env);
       }
       const message = update?.message;
@@ -185,6 +194,7 @@ export function createTelegramService({
           reply = formatDuplicateCandidates(candidates, {
             currentChannelId: env.TELEGRAM_CHANNEL_ID,
           });
+          replyMarkup = buildDuplicateCandidateMarkup(candidates);
         }
       } else if (command === "/delete") {
         if (!isUserAdmin) {
@@ -737,6 +747,90 @@ export function createTelegramService({
       }
     },
 
+    async handleDuplicateDeletionCallback(db, callback, env, action) {
+      const chatId = callback?.message?.chat?.id;
+      const userId = String(callback?.from?.id ?? "");
+      if (!chatId || callback?.message?.chat?.type !== "private") {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "仅支持在与 Bot 的私聊中操作。",
+          show_alert: true,
+        });
+        return { ignored: "non_private_duplicate_deletion_callback" };
+      }
+      if (!(await this.isAuthorizedAdmin(userId, env))) {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "权限不足",
+          show_alert: true,
+        });
+        return { ignored: "duplicate_deletion_callback_not_admin" };
+      }
+
+      if (action.action === "cancel") {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "已取消，不会删除。",
+        });
+        await this.callTelegram(env, "editMessageText", {
+          chat_id: chatId,
+          message_id: callback.message.message_id,
+          text: "已取消删除；该候选仍保留。",
+        });
+        return { chat_id: chatId, cancelled: true };
+      }
+
+      if (action.action === "delete") {
+        const candidate = await this.getDuplicateCandidate(db, action.mediaId);
+        if (!candidate) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该候选已失效，请重新执行 /duplicates。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "duplicate_candidate_not_found" };
+        }
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "请在新消息中确认删除。",
+        });
+        await this.callTelegram(env, "sendMessage", {
+          chat_id: chatId,
+          text: formatDuplicateDeletionConfirmation(candidate, env),
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[
+              {
+                text: "确认删除此条",
+                callback_data: encodeDuplicateDeletionCallback("confirm", candidate.media_id),
+              },
+              {
+                text: "取消",
+                callback_data: encodeDuplicateDeletionCallback("cancel", candidate.media_id),
+              },
+            ]],
+          },
+        });
+        return { chat_id: chatId, confirmation_requested: candidate.media_id };
+      }
+
+      const result = await this.deleteDuplicateCandidate(db, env, {
+        mediaId: action.mediaId,
+        deletedByUserId: userId,
+      });
+      await this.callTelegram(env, "answerCallbackQuery", {
+        callback_query_id: callback.id,
+        text: result.outcome === "not_duplicate_candidate" ? "候选已失效" : "删除处理完成",
+      });
+      await this.callTelegram(env, "editMessageText", {
+        chat_id: chatId,
+        message_id: callback.message.message_id,
+        text: formatDuplicateDeletionResult(result),
+        parse_mode: "HTML",
+      });
+      return { chat_id: chatId, outcome: result.outcome };
+    },
+
     async getCatalogStats(db, { includeAdmin = false } = {}) {
       const statements = [
         db.prepare(`
@@ -825,8 +919,8 @@ export function createTelegramService({
       return groupRowsBy(result.results ?? [], "tg_file_unique_id");
     },
 
-    async deleteDuplicateCandidate(db, env, { mediaId, deletedByUserId }) {
-      const candidate = await db
+    async getDuplicateCandidate(db, mediaId) {
+      return db
         .prepare(`
           SELECT
             m.id AS media_id,
@@ -855,6 +949,10 @@ export function createTelegramService({
         `)
         .bind(mediaId)
         .first();
+    },
+
+    async deleteDuplicateCandidate(db, env, { mediaId, deletedByUserId }) {
+      const candidate = await this.getDuplicateCandidate(db, mediaId);
       if (!candidate) {
         return { outcome: "not_duplicate_candidate" };
       }
@@ -1414,6 +1512,58 @@ function formatDuplicateCandidates(groups, { currentChannelId = "" } = {}) {
     }
   }
   return lines.join("\n");
+}
+
+function buildDuplicateCandidateMarkup(groups) {
+  const rows = [];
+  for (const candidates of groups.values()) {
+    for (const candidate of candidates) {
+      const callbackData = encodeDuplicateDeletionCallback("delete", candidate.media_id);
+      if (!callbackData) {
+        continue;
+      }
+      const code = candidate.normalized_code
+        ? `删除 #${candidate.normalized_code}`
+        : "删除此候选";
+      rows.push([{ text: code, callback_data: callbackData }]);
+    }
+  }
+  return rows.length > 0 ? { inline_keyboard: rows } : null;
+}
+
+function encodeDuplicateDeletionCallback(action, mediaId) {
+  const actionCode = { delete: "d", confirm: "c", cancel: "x" }[action];
+  if (!actionCode || !/^media_[a-f0-9]{32}$/iu.test(mediaId ?? "")) {
+    return null;
+  }
+  const callbackData = `dupdel:${actionCode}:${mediaId.toLowerCase()}`;
+  return callbackData.length <= 64 ? callbackData : null;
+}
+
+function decodeDuplicateDeletionCallback(data) {
+  if (typeof data !== "string") {
+    return null;
+  }
+  const match = /^dupdel:([dcx]):(media_[a-f0-9]{32})$/iu.exec(data);
+  if (!match) {
+    return null;
+  }
+  const action = { d: "delete", c: "confirm", x: "cancel" }[match[1].toLowerCase()];
+  return action ? { action, mediaId: match[2].toLowerCase() } : null;
+}
+
+function formatDuplicateDeletionConfirmation(candidate, env) {
+  const code = candidate.normalized_code
+    ? `#${escapeHtml(candidate.normalized_code)}`
+    : "该媒体";
+  const title = candidate.title ? ` · ${escapeHtml(candidate.title)}` : "";
+  const isLegacy =
+    env.TELEGRAM_CHANNEL_ID &&
+    String(candidate.tg_chat_id) !== String(env.TELEGRAM_CHANNEL_ID);
+  const scope = isLegacy
+    ? "将只删除旧频道遗留的目录记录；不会操作已注销旧频道的原消息。"
+    : "将删除当前频道消息及其目录记录。";
+  return `<b>确认删除 ${code}${title}？</b>\n${scope}\n\n点击“确认删除此条”后才会执行。`;
 }
 
 function parseDuplicateDeletionCommand(text) {
