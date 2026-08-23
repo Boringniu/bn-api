@@ -1078,7 +1078,8 @@ test("newstory starts title entry then creates an empty top-level story for admi
   await service.handleUpdate(db, {
     message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/newstory" },
   }, env);
-  assert.ok(calls[0].body.text.includes("请输入一级剧情名称"));
+  assert.equal(calls[0].body.text, "请输入一级剧情名称。");
+  assert.ok(!calls[0].body.text.includes("例如："));
   assert.deepEqual(calls[0].body.reply_markup, {
     inline_keyboard: [[{ text: "取消", callback_data: "story:x" }]],
   });

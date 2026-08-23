@@ -557,7 +557,7 @@ export function createTelegramService({
             replyMarkup = buildStoryCreatedMarkup(created.story);
           } else {
             await storyService.startTitleEntry(db, userId);
-            reply = "请输入一级剧情名称。\n\n例如：我同情我那30岁还是处男的妹夫，于是满足了他毕生的愿望。";
+            reply = "请输入一级剧情名称。";
             replyMarkup = buildStoryEntryCancelMarkup();
           }
         }
