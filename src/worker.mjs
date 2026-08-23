@@ -19,6 +19,7 @@ import { createIngestService } from "./ingest-service.mjs";
 import { createMediaInputParser } from "./media-input.mjs";
 import { createReviewService } from "./review-service.mjs";
 import { createSearchService } from "./search-service.mjs";
+import { createStoryService } from "./story-service.mjs";
 import { createTagNormalizer } from "./tag-normalizer.mjs";
 import { createTelegramService } from "./telegram-service.mjs";
 import { createWorkerApp } from "./worker-app.mjs";
@@ -55,6 +56,7 @@ const searchService = createSearchService({
   tagDictionaryConfig,
   versionConfig,
 });
+const storyService = createStoryService({ searchService });
 const app = createWorkerApp({
   ingestService,
   reviewService: createReviewService({
@@ -68,6 +70,7 @@ const app = createWorkerApp({
     ingestService,
     searchConfig,
     searchService,
+    storyService,
     versionConfig,
   }),
   versionConfig,

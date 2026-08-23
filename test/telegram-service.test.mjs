@@ -11,12 +11,13 @@ const configs = await loadJsonDirectory(CONFIG_DIR);
 const displayConfig = configs.get("display").data;
 const versionConfig = configs.get("version").data;
 
-function createService({ searchService, fetchImpl } = {}) {
+function createService({ searchService, storyService, fetchImpl } = {}) {
   return createTelegramService({
     categoryConfig: configs.get("category").data,
     displayConfig,
     searchConfig: configs.get("search").data,
     searchService: searchService ?? createSearchStub(),
+    storyService: storyService ?? null,
     versionConfig,
     fetchImpl: fetchImpl ?? (async () => ({ json: async () => ({ ok: true, result: {} }) })),
   });
@@ -980,6 +981,154 @@ test("private bot adds next-page navigation and edits the result on callback", a
   });
 });
 
+test("series stories list top-level entries and reuse standard clickable search results", async () => {
+  const calls = [];
+  const story = {
+    id: "story_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    title: "我同情我那30岁还是处男的妹夫，于是满足了他毕生的愿望。",
+    video_count: 1,
+  };
+  const storyService = {
+    async getSession() { return null; },
+    async listStories() {
+      return { page: 1, page_size: 10, total: 1, results: [story] };
+    },
+    async getStory() { return story; },
+    async findStoryMedia() {
+      return { page: 1, page_size: 10, total: 1, results: [{
+        ...sampleMedia,
+        description: "资源发布时保存的文字介绍",
+      }] };
+    },
+  };
+  const service = createService({
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+  const db = new FakeD1();
+
+  await service.handleUpdate(db, {
+    message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/stories" },
+  }, { TELEGRAM_BOT_TOKEN: "bot-token" });
+
+  assert.ok(calls[0].body.text.includes("我同情我那30岁还是处男的妹夫"));
+  assert.ok(calls[0].body.text.includes("【1】"));
+  assert.deepEqual(calls[0].body.reply_markup, {
+    inline_keyboard: [[{
+      text: "我同情我那30岁还是处男的妹夫，于是满足了他毕生的愿望。【1】",
+      callback_data: "story:v:story_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1",
+    }]],
+  });
+
+  await service.handleUpdate(db, {
+    callback_query: {
+      id: "story-view-1",
+      data: "story:v:story_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1",
+      from: { id: 222 },
+      message: { message_id: 88, chat: { id: 111, type: "private" } },
+    },
+  }, { TELEGRAM_BOT_TOKEN: "bot-token" });
+
+  assert.equal(calls[1].method, "answerCallbackQuery");
+  assert.equal(calls[2].method, "editMessageText");
+  assert.ok(calls[2].body.text.includes("1 • <a href="));
+  assert.ok(calls[2].body.text.includes("<b>简介：</b>资源发布时保存的文字介绍"));
+  assert.deepEqual(calls[2].body.reply_markup, {
+    inline_keyboard: [[{
+      text: "返回剧情目录",
+      callback_data: "story:l:1",
+    }]],
+  });
+});
+
+test("newstory starts title entry then creates an empty top-level story for admins", async () => {
+  const calls = [];
+  const created = [];
+  let session = null;
+  const story = {
+    id: "story_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    title: "新的系列剧情",
+    video_count: 0,
+  };
+  const storyService = {
+    async getSession() { return session; },
+    async startTitleEntry() { session = { mode: "awaiting_title" }; },
+    async createStory(_db, value) { created.push(value); return { story, created: true }; },
+    async clearSession() { session = null; },
+  };
+  const service = createService({
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+  const db = new FakeD1();
+  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" };
+
+  await service.handleUpdate(db, {
+    message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/newstory" },
+  }, env);
+  assert.ok(calls[0].body.text.includes("请输入一级剧情名称"));
+  assert.deepEqual(calls[0].body.reply_markup, {
+    inline_keyboard: [[{ text: "取消", callback_data: "story:x" }]],
+  });
+
+  await service.handleUpdate(db, {
+    message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "新的系列剧情" },
+  }, env);
+  assert.deepEqual(created, [{ title: "新的系列剧情", createdByUserId: "222" }]);
+  assert.ok(calls[1].body.text.includes("新的系列剧情</b>【0】"));
+  assert.deepEqual(calls[1].body.reply_markup, {
+    inline_keyboard: [
+      [{ text: "添加视频", callback_data: "story:m:story_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }],
+      [{ text: "查看系列剧情", callback_data: "story:l:1" }],
+    ],
+  });
+});
+
+test("admin story selection adds an existing video without moving the channel resource", async () => {
+  const calls = [];
+  const story = {
+    id: "story_cccccccccccccccccccccccccccccccc",
+    title: "新的系列剧情",
+    video_count: 1,
+  };
+  const storyService = {
+    async getSession() {
+      return { mode: "awaiting_media_query", story_id: story.id, query: "ABP-123", page: 1 };
+    },
+    async addMediaToActiveStory() {
+      return { outcome: "added", story, media: sampleMedia };
+    },
+  };
+  const service = createService({
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+
+  const result = await service.handleUpdate(new FakeD1(), {
+    callback_query: {
+      id: "story-add-1",
+      data: "story:a:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      from: { id: 222 },
+      message: { message_id: 89, chat: { id: 111, type: "private" } },
+    },
+  }, { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" });
+
+  assert.deepEqual(result, { chat_id: 111, story_media_outcome: "added" });
+  assert.deepEqual(calls, [{
+    method: "answerCallbackQuery",
+    body: { callback_query_id: "story-add-1", text: "已加入当前剧情。", show_alert: false },
+  }]);
+});
+
 test("admin private forward from the configured legacy channel is indexed then deleted", async () => {
   const telegramCalls = [];
   const ingestCalls = [];
@@ -1440,6 +1589,8 @@ test("configures webhook to receive channel posts and channel edits", async () =
     commands: [
       { command: "stats", description: "查看收录统计" },
       { command: "index", description: "跳转频道索引" },
+      { command: "stories", description: "浏览系列剧情" },
+      { command: "newstory", description: "新增一级剧情（管理员）" },
       { command: "duplicates", description: "查看重复候选（管理员）" },
       { command: "delete", description: "删除重复候选（管理员）" },
       { command: "refresh", description: "刷新频道索引（管理员）" },

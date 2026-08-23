@@ -150,12 +150,19 @@ export function createSearchService({
       };
     },
 
-    async getMedia(db, mediaId) {
+    async getMedia(db, mediaId, { includeChannelLinks = false } = {}) {
       assertDatabase(db);
+      const channelColumns = includeChannelLinks
+        ? ", cp.tg_chat_id AS channel_chat_id, cp.tg_message_id AS channel_message_id"
+        : "";
+      const channelJoin = includeChannelLinks
+        ? "LEFT JOIN channel_posts cp ON cp.media_id = m.id"
+        : "";
       const row = await db
         .prepare(
-          `SELECT ${PUBLIC_MEDIA_COLUMNS}
+          `SELECT ${PUBLIC_MEDIA_COLUMNS}${channelColumns}
            FROM media m
+           ${channelJoin}
            WHERE m.id = ? AND m.status = 'approved'
            LIMIT 1`,
         )

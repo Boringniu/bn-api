@@ -6,6 +6,8 @@ const PAGE_CHAR_LIMIT = 3800;
 const TAGS_PER_LINE = 5;
 const INDEX_ITEMS_PER_BLOCK = 24;
 const BOT_DESCRIPTION_LIMIT = 240;
+const STORY_LIST_COMMANDS = new Set(["/系列剧情", "系列剧情", "/stories"]);
+const STORY_CREATE_COMMANDS = new Set(["/新增剧情", "新增剧情", "/newstory"]);
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
@@ -18,6 +20,7 @@ export function createTelegramService({
   ingestService = null,
   searchConfig,
   searchService,
+  storyService = null,
   versionConfig,
   fetchImpl = fetch,
   mediaGroupSettleMs = DEFAULT_MEDIA_GROUP_SETTLE_MS,
@@ -77,6 +80,167 @@ export function createTelegramService({
         .join("\n");
     },
 
+    async handleStoryCallback(db, callback, env, action) {
+      const chatId = callback?.message?.chat?.id;
+      const userId = String(callback?.from?.id ?? "");
+      if (!chatId || callback?.message?.chat?.type !== "private") {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "仅支持在与 Bot 的私聊中操作。",
+          show_alert: true,
+        });
+        return { ignored: "non_private_story_callback" };
+      }
+      if (!storyService) {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "系列剧情功能暂不可用。",
+          show_alert: true,
+        });
+        return { ignored: "story_service_unavailable" };
+      }
+
+      if (action.type === "list") {
+        const page = await storyService.listStories(db, {
+          page: action.page,
+          pageSize: botResult.page_size,
+        });
+        return editStoryMessage(this, env, callback, {
+          text: formatStoryList(page),
+          replyMarkup: buildStoryListMarkup(page),
+        });
+      }
+
+      if (action.type === "view") {
+        const story = await storyService.getStory(db, action.storyId);
+        if (!story) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该剧情条目已不存在。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "story_not_found" };
+        }
+        const page = await storyService.findStoryMedia(db, {
+          storyId: story.id,
+          page: action.page,
+          pageSize: botResult.page_size,
+        });
+        const isUserAdmin = await this.isAuthorizedAdmin(userId, env);
+        return editStoryMessage(this, env, callback, {
+          text: formatStoryMediaPage(story, page, this.renderBotResults.bind(this)),
+          replyMarkup: buildStoryMediaMarkup(story, page, { isUserAdmin }),
+        });
+      }
+
+      const isUserAdmin = await this.isAuthorizedAdmin(userId, env);
+      if (!isUserAdmin) {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "权限不足",
+          show_alert: true,
+        });
+        return { chat_id: chatId, ignored: "story_callback_not_admin" };
+      }
+
+      if (action.type === "manage") {
+        const story = await storyService.startMediaSelection(db, {
+          userId,
+          storyId: action.storyId,
+        });
+        if (!story) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "该剧情条目已不存在。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "story_not_found" };
+        }
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "请输入查询词选择视频。",
+        });
+        await this.callTelegram(env, "sendMessage", {
+          chat_id: chatId,
+          text: formatStoryManagementPrompt(story),
+          parse_mode: "HTML",
+          reply_markup: buildStoryManagementMarkup(story),
+        });
+        return { chat_id: chatId, story_management_started: story.id };
+      }
+
+      if (action.type === "query_page") {
+        const session = await storyService.getSession(db, userId);
+        if (!session?.query) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "请先输入番号、演员或话题。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "story_query_missing" };
+        }
+        await storyService.setMediaQuery(db, {
+          userId,
+          query: session.query,
+          page: action.page,
+        });
+        return editStorySelectionMessage(this, db, callback, env, {
+          storyService,
+          userId,
+          page: action.page,
+        });
+      }
+
+      if (action.type === "add") {
+        const result = await storyService.addMediaToActiveStory(db, {
+          userId,
+          mediaId: action.mediaId,
+        });
+        const text = {
+          added: "已加入当前剧情。",
+          already_added: "该视频已在当前剧情中。",
+          media_not_found: "该视频已不存在或未审核。",
+          story_not_found: "当前剧情已不存在。",
+          no_active_story: "当前没有正在管理的剧情。",
+        }[result.outcome] ?? "操作失败，请重试。";
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text,
+          show_alert: result.outcome !== "added" && result.outcome !== "already_added",
+        });
+        return { chat_id: chatId, story_media_outcome: result.outcome };
+      }
+
+      if (action.type === "done") {
+        const session = await storyService.getSession(db, userId);
+        await storyService.clearSession(db, userId);
+        const story = session?.story_id
+          ? await storyService.getStory(db, session.story_id)
+          : null;
+        return editStoryMessage(this, env, callback, {
+          text: story
+            ? `✅ 已完成“${escapeHtml(story.title)}”的选片，当前共 ${story.video_count} 条视频。`
+            : "已结束剧情选片。",
+          replyMarkup: null,
+        });
+      }
+
+      if (action.type === "cancel") {
+        await storyService.clearSession(db, userId);
+        return editStoryMessage(this, env, callback, {
+          text: "已取消本次剧情选片，已加入的视频仍会保留。",
+          replyMarkup: null,
+        });
+      }
+
+      await this.callTelegram(env, "answerCallbackQuery", {
+        callback_query_id: callback.id,
+        text: "操作已失效，请重试。",
+        show_alert: true,
+      });
+      return { chat_id: chatId, ignored: "unknown_story_action" };
+    },
+
     async handleSearchNavigation(db, callback, env) {
       const chatId = callback?.message?.chat?.id;
       if (!chatId || callback?.message?.chat?.type !== "private") {
@@ -130,6 +294,10 @@ export function createTelegramService({
         return this.handleEditedChannelPost(db, update.edited_channel_post, env);
       }
       if (update?.callback_query) {
+        const storyAction = decodeStoryCallback(update.callback_query.data);
+        if (storyAction) {
+          return this.handleStoryCallback(db, update.callback_query, env, storyAction);
+        }
         const duplicateAction = decodeDuplicateDeletionCallback(update.callback_query.data);
         if (duplicateAction) {
           return this.handleDuplicateDeletionCallback(
@@ -159,7 +327,14 @@ export function createTelegramService({
       }
 
       const command = text.split(/\s+/u)[0].toLowerCase();
-      const needsAdminCheck = ["/stats", "/duplicates", "/delete", "/refresh"].includes(command);
+      const isStoryListCommand = STORY_LIST_COMMANDS.has(command);
+      const isStoryCreateCommand = STORY_CREATE_COMMANDS.has(command);
+      const storySession = storyService
+        ? await storyService.getSession(db, userId)
+        : null;
+      const needsAdminCheck = ["/stats", "/duplicates", "/delete", "/refresh"].includes(command)
+        || isStoryCreateCommand
+        || Boolean(storySession);
       const isUserAdmin = needsAdminCheck
         ? await this.isAuthorizedAdmin(userId, env)
         : false;
@@ -184,9 +359,71 @@ export function createTelegramService({
           "例如：ADN-100、ADN、白雪、#剧情\n\n" +
           "/stats - 查看收录统计\n" +
           "/index - 浏览频道索引\n" +
+          "/系列剧情 - 浏览系列剧情\n" +
+          "/新增剧情 - 新增一级剧情（管理员）\n" +
           "/duplicates - 查看重复候选（管理员）\n" +
           "/delete - 打开删除候选（管理员）\n" +
           "/refresh - 刷新频道索引（管理员）";
+      } else if (isStoryListCommand) {
+        if (!storyService) {
+          reply = "系列剧情功能暂不可用。";
+        } else {
+          const stories = await storyService.listStories(db, {
+            page: 1,
+            pageSize: botResult.page_size,
+          });
+          reply = formatStoryList(stories);
+          replyMarkup = buildStoryListMarkup(stories);
+        }
+      } else if (isStoryCreateCommand) {
+        if (!storyService || !isUserAdmin) {
+          reply = "权限不足";
+        } else {
+          const inlineTitle = text.slice(command.length).trim();
+          if (inlineTitle) {
+            const created = await storyService.createStory(db, {
+              title: inlineTitle,
+              createdByUserId: userId,
+            });
+            reply = formatStoryCreated(created);
+            replyMarkup = buildStoryCreatedMarkup(created.story);
+          } else {
+            await storyService.startTitleEntry(db, userId);
+            reply = "请输入一级剧情名称。\n\n例如：我同情我那30岁还是处男的妹夫，于是满足了他毕生的愿望。";
+            replyMarkup = buildStoryEntryCancelMarkup();
+          }
+        }
+      } else if (storySession?.mode === "awaiting_title") {
+        if (!isUserAdmin || !storyService) {
+          reply = "权限不足";
+        } else {
+          const created = await storyService.createStory(db, {
+            title: text,
+            createdByUserId: userId,
+          });
+          await storyService.clearSession(db, userId);
+          reply = formatStoryCreated(created);
+          replyMarkup = buildStoryCreatedMarkup(created.story);
+        }
+      } else if (storySession?.mode === "awaiting_media_query") {
+        if (!isUserAdmin || !storyService) {
+          reply = "权限不足";
+        } else {
+          const story = await storyService.getStory(db, storySession.story_id);
+          if (!story) {
+            await storyService.clearSession(db, userId);
+            reply = "当前剧情条目已不存在，已结束选片。";
+          } else {
+            await storyService.setMediaQuery(db, { userId, query: text, page: 1 });
+            const search = await resolveDirectorySearch(db, text, 1);
+            reply = formatStorySelectionReply(story, {
+              query: text,
+              resolution: search.resolution,
+              searchResult: search.result,
+            });
+            replyMarkup = buildStorySelectionMarkup(story, search.result);
+          }
+        }
       } else if (text === "/duplicates" || command === "/delete") {
         if (!isUserAdmin) {
           reply = "权限不足";
@@ -681,6 +918,8 @@ export function createTelegramService({
         commands: [
           { command: "stats", description: "查看收录统计" },
           { command: "index", description: "跳转频道索引" },
+          { command: "stories", description: "浏览系列剧情" },
+          { command: "newstory", description: "新增一级剧情（管理员）" },
           { command: "duplicates", description: "查看重复候选（管理员）" },
           { command: "delete", description: "删除重复候选（管理员）" },
           { command: "refresh", description: "刷新频道索引（管理员）" },
@@ -1423,6 +1662,257 @@ export function createTelegramService({
   function encodeSearchNavigation(query, page) {
     const data = `search:${page}:${encodeURIComponent(query)}`;
     return data.length <= 64 ? data : null;
+  }
+
+  async function editStoryMessage(telegramService, env, callback, { text, replyMarkup }) {
+    const chatId = callback.message.chat.id;
+    await telegramService.callTelegram(env, "answerCallbackQuery", {
+      callback_query_id: callback.id,
+    });
+    try {
+      await telegramService.callTelegram(env, "editMessageText", {
+        chat_id: chatId,
+        message_id: callback.message.message_id,
+        text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      });
+    } catch (error) {
+      if (!String(error.message).includes("message is not modified")) {
+        throw error;
+      }
+    }
+    return { chat_id: chatId, replied: true };
+  }
+
+  async function editStorySelectionMessage(telegramService, db, callback, env, {
+    storyService: activeStoryService,
+    userId,
+    page,
+  }) {
+    const session = await activeStoryService.getSession(db, userId);
+    const story = session?.story_id
+      ? await activeStoryService.getStory(db, session.story_id)
+      : null;
+    if (!session?.query || !story) {
+      await activeStoryService.clearSession(db, userId);
+      return editStoryMessage(telegramService, env, callback, {
+        text: "当前剧情选片已失效，请重新点击“管理视频”。",
+        replyMarkup: null,
+      });
+    }
+    const search = await resolveDirectorySearch(db, session.query, page);
+    return editStoryMessage(telegramService, env, callback, {
+      text: formatStorySelectionReply(story, {
+        query: session.query,
+        resolution: search.resolution,
+        searchResult: search.result,
+      }),
+      replyMarkup: buildStorySelectionMarkup(story, search.result),
+    });
+  }
+
+  function formatStoryList(page) {
+    if (page.total === 0) {
+      return "📚 <b>系列剧情</b>\n\n暂未创建系列剧情。";
+    }
+    const offset = (page.page - 1) * page.page_size;
+    const lines = ["📚 <b>系列剧情</b>", "点击条目查看该剧情下的视频。", ""];
+    for (const [index, story] of page.results.entries()) {
+      lines.push(`${offset + index + 1} • ${escapeHtml(story.title)}【${story.video_count}】`);
+    }
+    return lines.join("\n");
+  }
+
+  function formatStoryCreated({ story, created }) {
+    const prefix = created ? "✅ 已创建" : "该剧情已存在";
+    return `${prefix}：<b>${escapeHtml(story.title)}</b>【${story.video_count}】\n\n点击“添加视频”开始选择二级视频。`;
+  }
+
+  function formatStoryManagementPrompt(story) {
+    return `<b>正在管理：</b>${escapeHtml(story.title)}【${story.video_count}】\n\n请直接输入番号、番号前缀、演员名或 #话题，Bot 会显示匹配视频；点击“加入当前剧情”即可关联。`;
+  }
+
+  function formatStoryMediaPage(story, page, renderResults) {
+    const header = `<b>${escapeHtml(story.title)}</b>【${story.video_count}】`;
+    if (page.total === 0) {
+      return `${header}\n\n该剧情暂未关联视频。`;
+    }
+    return `${header}\n\n${renderResults(page)}`;
+  }
+
+  function formatStorySelectionReply(story, { query, resolution, searchResult }) {
+    const heading = `<b>为“${escapeHtml(story.title)}”选择视频</b>`;
+    return `${heading}\n\n${renderSearchReply({ query, resolution, searchResult })}`;
+  }
+
+  function buildStoryListMarkup(page) {
+    const rows = page.results.flatMap((story) => {
+      const callbackData = encodeStoryCallback("view", story.id, page.page);
+      if (!callbackData) {
+        return [];
+      }
+      const label = `${story.title}【${story.video_count}】`;
+      return [[{ text: label.length > 60 ? `${label.slice(0, 59)}…` : label, callback_data: callbackData }]];
+    });
+    const pagination = [];
+    if (page.page > 1) {
+      pagination.push({ text: "‹ 上一页", callback_data: encodeStoryCallback("list", page.page - 1) });
+    }
+    if (page.page * page.page_size < page.total) {
+      pagination.push({ text: "下一页 ›", callback_data: encodeStoryCallback("list", page.page + 1) });
+    }
+    if (pagination.length > 0) {
+      rows.push(pagination.filter((entry) => entry.callback_data));
+    }
+    return rows.length > 0 ? { inline_keyboard: rows } : null;
+  }
+
+  function buildStoryCreatedMarkup(story) {
+    return {
+      inline_keyboard: [
+        [{ text: "添加视频", callback_data: encodeStoryCallback("manage", story.id) }],
+        [{ text: "查看系列剧情", callback_data: encodeStoryCallback("list", 1) }],
+      ],
+    };
+  }
+
+  function buildStoryEntryCancelMarkup() {
+    return {
+      inline_keyboard: [[{ text: "取消", callback_data: encodeStoryCallback("cancel") }]],
+    };
+  }
+
+  function buildStoryManagementMarkup(story) {
+    return {
+      inline_keyboard: [
+        [{ text: "查看该剧情", callback_data: encodeStoryCallback("view", story.id, 1) }],
+        [{ text: "完成", callback_data: encodeStoryCallback("done") }, { text: "取消", callback_data: encodeStoryCallback("cancel") }],
+      ],
+    };
+  }
+
+  function buildStoryMediaMarkup(story, page, { isUserAdmin }) {
+    const rows = [];
+    const pagination = [];
+    if (page.page > 1) {
+      pagination.push({ text: "‹ 上一页", callback_data: encodeStoryCallback("view", story.id, page.page - 1) });
+    }
+    if (page.page * page.page_size < page.total) {
+      pagination.push({ text: "下一页 ›", callback_data: encodeStoryCallback("view", story.id, page.page + 1) });
+    }
+    if (pagination.length > 0) {
+      rows.push(pagination.filter((entry) => entry.callback_data));
+    }
+    if (isUserAdmin) {
+      rows.push([{ text: "管理视频", callback_data: encodeStoryCallback("manage", story.id) }]);
+    }
+    rows.push([{ text: "返回剧情目录", callback_data: encodeStoryCallback("list", 1) }]);
+    return { inline_keyboard: rows };
+  }
+
+  function buildStorySelectionMarkup(story, searchResult) {
+    const rows = [];
+    for (const media of searchResult.results) {
+      const callbackData = encodeStoryCallback("add", media.id);
+      if (!callbackData) {
+        continue;
+      }
+      const code = media.code ? `#${media.code}` : "未标号视频";
+      rows.push([{ text: `加入当前剧情 · ${code}`, callback_data: callbackData }]);
+    }
+    const pagination = [];
+    if (searchResult.page > 1) {
+      pagination.push({ text: "‹ 上一页", callback_data: encodeStoryCallback("query_page", searchResult.page - 1) });
+    }
+    if (searchResult.page * searchResult.page_size < searchResult.total) {
+      pagination.push({ text: "下一页 ›", callback_data: encodeStoryCallback("query_page", searchResult.page + 1) });
+    }
+    if (pagination.length > 0) {
+      rows.push(pagination.filter((entry) => entry.callback_data));
+    }
+    rows.push([{ text: "完成", callback_data: encodeStoryCallback("done") }, { text: "取消", callback_data: encodeStoryCallback("cancel") }]);
+    return { inline_keyboard: rows };
+  }
+
+  function encodeStoryCallback(action, value, page) {
+    const actionCode = {
+      list: "l",
+      view: "v",
+      manage: "m",
+      query_page: "q",
+      add: "a",
+      done: "d",
+      cancel: "x",
+    }[action];
+    if (!actionCode) {
+      return null;
+    }
+    let data = `story:${actionCode}`;
+    if (action === "list" || action === "query_page") {
+      if (!Number.isInteger(value) || value < 1 || value > 9999) {
+        return null;
+      }
+      data += `:${value}`;
+    } else if (action === "view") {
+      if (!isStoryIdentifier(value) || !Number.isInteger(page) || page < 1 || page > 9999) {
+        return null;
+      }
+      data += `:${value}:${page}`;
+    } else if (action === "manage") {
+      if (!isStoryIdentifier(value)) {
+        return null;
+      }
+      data += `:${value}`;
+    } else if (action === "add") {
+      if (!isMediaIdentifier(value)) {
+        return null;
+      }
+      data += `:${value}`;
+    }
+    return data.length <= 64 ? data : null;
+  }
+
+  function decodeStoryCallback(data) {
+    if (typeof data !== "string") {
+      return null;
+    }
+    let match = /^story:l:(\d{1,4})$/u.exec(data);
+    if (match) {
+      return { type: "list", page: Number(match[1]) };
+    }
+    match = /^story:v:(story_[a-f0-9]{32}):(\d{1,4})$/iu.exec(data);
+    if (match) {
+      return { type: "view", storyId: match[1].toLowerCase(), page: Number(match[2]) };
+    }
+    match = /^story:m:(story_[a-f0-9]{32})$/iu.exec(data);
+    if (match) {
+      return { type: "manage", storyId: match[1].toLowerCase() };
+    }
+    match = /^story:q:(\d{1,4})$/u.exec(data);
+    if (match) {
+      return { type: "query_page", page: Number(match[1]) };
+    }
+    match = /^story:a:(media_[a-f0-9]{32})$/iu.exec(data);
+    if (match) {
+      return { type: "add", mediaId: match[1].toLowerCase() };
+    }
+    if (data === "story:d") {
+      return { type: "done" };
+    }
+    if (data === "story:x") {
+      return { type: "cancel" };
+    }
+    return null;
+  }
+
+  function isStoryIdentifier(value) {
+    return /^story_[a-f0-9]{32}$/iu.test(value ?? "");
+  }
+
+  function isMediaIdentifier(value) {
+    return /^media_[a-f0-9]{32}$/iu.test(value ?? "");
   }
 
   function decodeSearchNavigation(data) {
