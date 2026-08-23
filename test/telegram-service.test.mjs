@@ -452,6 +452,7 @@ test("about command explains the direct query workflow", async () => {
   assert.ok(calls[0].body.text.includes("BN·media"));
   assert.ok(calls[0].body.text.includes("ADN-100、ADN、白雪、#剧情"));
   assert.ok(calls[0].body.text.includes("/stats - 查看收录统计"));
+  assert.ok(calls[0].body.text.includes("/reviews - 查看待审核明细（管理员）"));
   assert.deepEqual(calls[0].body.reply_markup, {
     keyboard: [[{ text: "系列剧情" }]],
     resize_keyboard: true,
@@ -512,6 +513,65 @@ test("stats command shows public catalog totals and admin quality metrics", asyn
   assert.ok(calls[1].body.text.includes("管理员数据质量"));
   assert.ok(calls[1].body.text.includes("待审核：0 条"));
   assert.ok(calls[1].body.text.includes("重复候选：4 组 / 8 条"));
+});
+
+test("reviews command is admin-only and shows pending reasons without internal IDs", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+  await service.handleUpdate(
+    new FakeD1(),
+    { message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/reviews" } },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" },
+  );
+  assert.equal(calls[0].body.text, "权限不足");
+
+  const adminDb = new FakeD1({
+    allResults: [[
+      {
+        review_type: "pending_actor",
+        trigger: "unknown_actor",
+        subject_type: "actor",
+        raw_values_json: '["未知演员"]',
+        normalized_values_json: '["未知演员"]',
+        origin: "ingest",
+        created_at: "2026-08-23T00:00:00Z",
+        normalized_code: "ADN-405",
+        tg_chat_id: "-1004460339207",
+        tg_message_id: 405,
+      },
+      {
+        review_type: "possible_code",
+        trigger: "unrecognized_code",
+        subject_type: "code",
+        raw_values_json: '["ADN405X"]',
+        normalized_values_json: '["adn405x"]',
+        origin: "ingest",
+        created_at: "2026-08-23T00:01:00Z",
+        normalized_code: null,
+        tg_chat_id: null,
+        tg_message_id: null,
+      },
+    ]],
+  });
+  await service.handleUpdate(
+    adminDb,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "待审核" } },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" },
+  );
+  const reply = calls[1].body.text;
+  assert.ok(reply.includes("待审核明细</b>（2 条）"), reply);
+  assert.ok(reply.includes("#ADN-405"));
+  assert.ok(reply.includes("演员名称未识别或有歧义"));
+  assert.ok(reply.includes("未知演员"));
+  assert.ok(reply.includes("编号格式需要确认"));
+  assert.ok(reply.includes("ADN405X"));
+  assert.ok(!reply.includes("media_"));
+  assert.ok(adminDb.statements[0].sql.includes("FROM review_items r"));
 });
 
 test("duplicates command is admin-only and only renders review candidates", async () => {
@@ -1900,6 +1960,7 @@ test("configures webhook to receive channel posts and channel edits", async () =
       { command: "stories", description: "浏览系列剧情" },
       { command: "newstory", description: "新增一级剧情（管理员）" },
       { command: "duplicates", description: "查看重复候选（管理员）" },
+      { command: "reviews", description: "查看待审核明细（管理员）" },
       { command: "delete", description: "删除重复候选（管理员）" },
       { command: "refresh", description: "刷新频道索引（管理员）" },
       { command: "about", description: "简介说明" },

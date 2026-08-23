@@ -496,10 +496,12 @@ export function createTelegramService({
       const command = text.split(/\s+/u)[0].toLowerCase();
       const isStoryListCommand = STORY_LIST_COMMANDS.has(command);
       const isStoryCreateCommand = STORY_CREATE_COMMANDS.has(command);
+      const isReviewListCommand = ["/reviews", "待审核", "/待审核"].includes(command);
       const storySession = storyService
         ? await storyService.getSession(db, userId)
         : null;
       const needsAdminCheck = ["/stats", "/duplicates", "/delete", "/refresh"].includes(command)
+        || isReviewListCommand
         || isStoryCreateCommand
         || Boolean(storySession);
       const isUserAdmin = needsAdminCheck
@@ -510,6 +512,13 @@ export function createTelegramService({
       if (text === "/stats") {
         const stats = await this.getCatalogStats(db, { includeAdmin: isUserAdmin });
         reply = formatCatalogStats(stats, { includeAdmin: isUserAdmin });
+      } else if (isReviewListCommand) {
+        if (!isUserAdmin) {
+          reply = "权限不足";
+        } else {
+          const reviews = await this.listPendingReviews(db);
+          reply = formatPendingReviews(reviews);
+        }
       } else if (text === "/index") {
         const [indexMessageId] = await readIndexMessageIds(db);
         const indexUrl = channelMessageUrl(
@@ -529,6 +538,7 @@ export function createTelegramService({
           "/系列剧情 - 浏览系列剧情\n" +
           "/新增剧情 - 新增一级剧情（管理员）\n" +
           "/duplicates - 查看重复候选（管理员）\n" +
+          "/reviews - 查看待审核明细（管理员）\n" +
           "/delete - 打开删除候选（管理员）\n" +
           "/refresh - 刷新频道索引（管理员）";
         replyMarkup = STORY_BROWSE_KEYBOARD;
@@ -1091,6 +1101,7 @@ export function createTelegramService({
           { command: "stories", description: "浏览系列剧情" },
           { command: "newstory", description: "新增一级剧情（管理员）" },
           { command: "duplicates", description: "查看重复候选（管理员）" },
+          { command: "reviews", description: "查看待审核明细（管理员）" },
           { command: "delete", description: "删除重复候选（管理员）" },
           { command: "refresh", description: "刷新频道索引（管理员）" },
           { command: "about", description: "简介说明" },
@@ -1283,6 +1294,42 @@ export function createTelegramService({
         duplicate_file_group_count: Number(duplicates.duplicate_file_group_count ?? 0),
         duplicate_media_count: Number(duplicates.duplicate_media_count ?? 0),
       };
+    },
+
+    async listPendingReviews(db) {
+      const result = await db
+        .prepare(
+          `SELECT
+             r.review_type,
+             r.trigger,
+             r.subject_type,
+             r.raw_values_json,
+             r.normalized_values_json,
+             r.origin,
+             r.created_at,
+             m.normalized_code,
+             cp.tg_chat_id,
+             cp.tg_message_id
+           FROM review_items r
+           JOIN media m ON m.id = r.media_id
+           LEFT JOIN channel_posts cp ON cp.media_id = m.id
+           WHERE r.status = 'pending'
+           ORDER BY r.created_at, r.id
+           LIMIT 10`,
+        )
+        .all();
+      return (result.results ?? []).map((row) => ({
+        review_type: row.review_type,
+        trigger: row.trigger,
+        subject_type: row.subject_type,
+        raw_values: parseJsonArray(row.raw_values_json),
+        normalized_values: parseJsonArray(row.normalized_values_json),
+        origin: row.origin,
+        created_at: row.created_at,
+        code: row.normalized_code,
+        channel_chat_id: row.tg_chat_id,
+        channel_message_id: row.tg_message_id,
+      }));
     },
 
     async listDuplicateCandidates(db) {
@@ -2483,6 +2530,47 @@ function formatDuplicateDeletionResult(result) {
     return `✅ 已删除 ${code} 的旧频道遗留目录记录；旧频道原消息未操作，并已写入删除审计。`;
   }
   return `✅ 已删除 ${code} 的频道消息与索引记录，并已写入删除审计。`;
+}
+
+function formatPendingReviews(reviews) {
+  if (reviews.length === 0) {
+    return "<b>待审核明细</b>\n\n当前没有待审核项。";
+  }
+  const lines = [`<b>待审核明细</b>（${reviews.length} 条）`];
+  for (const [index, item] of reviews.entries()) {
+    const channelUrl = channelMessageUrl(item.channel_chat_id, item.channel_message_id);
+    const code = item.code ? `#${escapeHtml(item.code)}` : "未识别编号";
+    const codeText = channelUrl ? `<a href="${escapeHtml(channelUrl)}">${code}</a>` : code;
+    const rawValues = item.raw_values.map((value) => escapeHtml(String(value))).filter(Boolean);
+    lines.push(
+      "",
+      `${index + 1} • ${codeText}`,
+      `原因：${escapeHtml(reviewTypeLabel(item.review_type))}`,
+      `待确认：${rawValues.length > 0 ? rawValues.join("、") : "未提供"}`,
+    );
+  }
+  lines.push("", "仅供查看，不会自动修改标签、演员或编号规则。");
+  return lines.join("\n");
+}
+
+function reviewTypeLabel(value) {
+  const labels = {
+    pending_tag: "标签未识别",
+    pending_actor: "演员名称未识别或有歧义",
+    pending_alias: "别名需要确认",
+    pending_category: "分类需要确认",
+    possible_code: "编号格式需要确认",
+  };
+  return labels[value] ?? "需要人工确认";
+}
+
+function parseJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function formatCatalogStats(stats, { includeAdmin }) {
