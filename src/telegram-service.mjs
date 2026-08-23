@@ -443,6 +443,15 @@ export function createTelegramService({
         if (storyAction) {
           return this.handleStoryCallback(db, update.callback_query, env, storyAction);
         }
+        const pendingCleanupAction = decodePendingReviewCleanupCallback(update.callback_query.data);
+        if (pendingCleanupAction) {
+          return this.handlePendingReviewCleanupCallback(
+            db,
+            update.callback_query,
+            env,
+            pendingCleanupAction,
+          );
+        }
         const duplicateAction = decodeDuplicateDeletionCallback(update.callback_query.data);
         if (duplicateAction) {
           return this.handleDuplicateDeletionCallback(
@@ -518,6 +527,7 @@ export function createTelegramService({
         } else {
           const reviews = await this.listPendingReviews(db);
           reply = formatPendingReviews(reviews);
+          replyMarkup = buildPendingReviewCleanupMarkup(reviews);
         }
       } else if (text === "/index") {
         const [indexMessageId] = await readIndexMessageIds(db);
@@ -1153,6 +1163,75 @@ export function createTelegramService({
       }
     },
 
+    async handlePendingReviewCleanupCallback(db, callback, env, action) {
+      const chatId = callback?.message?.chat?.id;
+      const userId = String(callback?.from?.id ?? "");
+      if (!chatId || callback?.message?.chat?.type !== "private") {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "仅支持在与 Bot 的私聊中操作。",
+          show_alert: true,
+        });
+        return { ignored: "non_private_pending_cleanup_callback" };
+      }
+      if (!(await this.isAuthorizedAdmin(userId, env))) {
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "权限不足",
+          show_alert: true,
+        });
+        return { chat_id: chatId, ignored: "pending_cleanup_callback_not_admin" };
+      }
+      if (action.action === "cancel") {
+        await this.clearPendingReviewCleanupSession(db, { userId });
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "已取消，不会清理。",
+        });
+        await this.callTelegram(env, "editMessageText", {
+          chat_id: chatId,
+          message_id: callback.message.message_id,
+          text: "已取消待审核清理；所有待审核目录记录均已保留。",
+        });
+        return { chat_id: chatId, cancelled: true };
+      }
+      if (action.action === "prompt") {
+        const entries = await this.startPendingReviewCleanup(db, { userId });
+        if (entries.length === 0) {
+          await this.callTelegram(env, "answerCallbackQuery", {
+            callback_query_id: callback.id,
+            text: "当前没有待审核目录记录。",
+            show_alert: true,
+          });
+          return { chat_id: chatId, ignored: "no_pending_media" };
+        }
+        await this.callTelegram(env, "answerCallbackQuery", {
+          callback_query_id: callback.id,
+          text: "请在新消息中确认清理。",
+        });
+        await this.callTelegram(env, "sendMessage", {
+          chat_id: chatId,
+          text: formatPendingReviewCleanupConfirmation(entries),
+          parse_mode: "HTML",
+          reply_markup: buildPendingReviewCleanupConfirmationMarkup(),
+        });
+        return { chat_id: chatId, confirmation_requested: entries.length };
+      }
+      const result = await this.deletePendingReviewMedia(db, { deletedByUserId: userId });
+      await this.callTelegram(env, "answerCallbackQuery", {
+        callback_query_id: callback.id,
+        text: result.outcome === "cleaned" ? "目录清理完成" : "清理对象已失效",
+        show_alert: result.outcome !== "cleaned",
+      });
+      await this.callTelegram(env, "editMessageText", {
+        chat_id: chatId,
+        message_id: callback.message.message_id,
+        text: formatPendingReviewCleanupResult(result),
+        parse_mode: "HTML",
+      });
+      return { chat_id: chatId, outcome: result.outcome, deleted_count: result.deleted_count };
+    },
+
     async handleDuplicateDeletionCallback(db, callback, env, action) {
       const chatId = callback?.message?.chat?.id;
       const userId = String(callback?.from?.id ?? "");
@@ -1330,6 +1409,132 @@ export function createTelegramService({
         channel_chat_id: row.tg_chat_id,
         channel_message_id: row.tg_message_id,
       }));
+    },
+
+    async listPendingReviewMedia(db) {
+      const result = await db
+        .prepare(
+          `SELECT
+             m.id AS media_id,
+             m.normalized_code,
+             m.title,
+             m.status AS media_status,
+             m.created_at,
+             m.updated_at,
+             cp.tg_chat_id,
+             cp.tg_message_id,
+             COUNT(r.id) AS pending_review_count
+           FROM media m
+           JOIN review_items r ON r.media_id = m.id AND r.status = 'pending'
+           LEFT JOIN channel_posts cp ON cp.media_id = m.id
+           GROUP BY m.id
+           ORDER BY MIN(r.created_at), m.id`,
+        )
+        .all();
+      return (result.results ?? []).map((row) => ({
+        media_id: row.media_id,
+        code: row.normalized_code,
+        title: row.title,
+        media_status: row.media_status,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        channel_chat_id: row.tg_chat_id,
+        channel_message_id: row.tg_message_id,
+        pending_review_count: Number(row.pending_review_count ?? 0),
+      }));
+    },
+
+    async startPendingReviewCleanup(db, { userId }) {
+      const entries = await this.listPendingReviewMedia(db);
+      const now = new Date().toISOString();
+      await db
+        .prepare(
+          `INSERT INTO pending_media_cleanup_sessions (
+             tg_user_id, media_ids_json, created_at, updated_at
+           ) VALUES (?, ?, ?, ?)
+           ON CONFLICT (tg_user_id) DO UPDATE SET
+             media_ids_json = excluded.media_ids_json,
+             updated_at = excluded.updated_at`,
+        )
+        .bind(String(userId), JSON.stringify(entries.map((entry) => entry.media_id)), now, now)
+        .run();
+      return entries;
+    },
+
+    async getPendingReviewCleanupSession(db, { userId }) {
+      const row = await db
+        .prepare("SELECT media_ids_json FROM pending_media_cleanup_sessions WHERE tg_user_id = ?")
+        .bind(String(userId))
+        .first();
+      return parseJsonArray(row?.media_ids_json).filter((mediaId) => /^media_[a-f0-9]{32}$/iu.test(mediaId));
+    },
+
+    async clearPendingReviewCleanupSession(db, { userId }) {
+      await db
+        .prepare("DELETE FROM pending_media_cleanup_sessions WHERE tg_user_id = ?")
+        .bind(String(userId))
+        .run();
+    },
+
+    async deletePendingReviewMedia(db, { deletedByUserId }) {
+      const mediaIds = await this.getPendingReviewCleanupSession(db, { userId: deletedByUserId });
+      if (mediaIds.length === 0) {
+        return { outcome: "cleanup_session_missing", deleted_count: 0, entries: [] };
+      }
+      const activeEntries = (await this.listPendingReviewMedia(db))
+        .filter((entry) => mediaIds.includes(entry.media_id));
+      if (activeEntries.length === 0) {
+        await this.clearPendingReviewCleanupSession(db, { userId: deletedByUserId });
+        return { outcome: "nothing_to_clean", deleted_count: 0, entries: [] };
+      }
+      const requestedAt = new Date().toISOString();
+      const prepared = activeEntries.map((entry) => ({
+        ...entry,
+        audit_token: crypto.randomUUID(),
+        snapshot_json: JSON.stringify({
+          media_id: entry.media_id,
+          normalized_code: entry.code,
+          title: entry.title,
+          media_status: entry.media_status,
+          created_at: entry.created_at,
+          updated_at: entry.updated_at,
+          tg_chat_id: entry.channel_chat_id,
+          tg_message_id: entry.channel_message_id,
+          pending_review_count: entry.pending_review_count,
+          deletion_scope: "catalog_only_no_telegram_delete",
+        }),
+      }));
+      const completedAt = new Date().toISOString();
+      const statements = [];
+      for (const entry of prepared) {
+        statements.push(
+          db.prepare(
+            `INSERT INTO pending_media_cleanup_audit (
+               audit_token, media_id, deleted_by_tg_user_id, snapshot_json,
+               outcome, requested_at, completed_at, error_message
+             ) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)`,
+          ).bind(
+            entry.audit_token,
+            entry.media_id,
+            deletedByUserId,
+            entry.snapshot_json,
+            requestedAt,
+            completedAt,
+            "Catalog record removed after explicit administrator confirmation; Telegram message was not deleted.",
+          ),
+          db.prepare("DELETE FROM media WHERE id = ? AND status = 'pending'").bind(entry.media_id),
+        );
+      }
+      const results = await db.batch(statements);
+      await this.clearPendingReviewCleanupSession(db, { userId: deletedByUserId });
+      const deletedCount = results.filter((result, index) =>
+        index % 2 === 1 && Number(result?.meta?.changes ?? result?.changes ?? 0) > 0,
+      ).length;
+      return {
+        outcome: "cleaned",
+        deleted_count: deletedCount,
+        entries: prepared,
+      };
     },
 
     async listDuplicateCandidates(db) {
@@ -2473,6 +2678,62 @@ function buildDuplicateCandidateMarkup(groups) {
     }
   }
   return rows.length > 0 ? { inline_keyboard: rows } : null;
+}
+
+function buildPendingReviewCleanupMarkup(reviews) {
+  if (reviews.length === 0) {
+    return null;
+  }
+  return {
+    inline_keyboard: [[{
+      text: `清理当前 ${reviews.length} 条待审核收录`,
+      callback_data: encodePendingReviewCleanupCallback("prompt"),
+    }]],
+  };
+}
+
+function buildPendingReviewCleanupConfirmationMarkup() {
+  return {
+    inline_keyboard: [[
+      { text: "确认清理这些记录", callback_data: encodePendingReviewCleanupCallback("confirm") },
+      { text: "取消", callback_data: encodePendingReviewCleanupCallback("cancel") },
+    ]],
+  };
+}
+
+function encodePendingReviewCleanupCallback(action) {
+  return { prompt: "revclean:p", confirm: "revclean:c", cancel: "revclean:x" }[action] ?? null;
+}
+
+function decodePendingReviewCleanupCallback(data) {
+  const actionCode = typeof data === "string" ? /^revclean:([pcx])$/u.exec(data)?.[1] : null;
+  const action = { p: "prompt", c: "confirm", x: "cancel" }[actionCode];
+  return action ? { action } : null;
+}
+
+function formatPendingReviewCleanupConfirmation(entries) {
+  const labels = entries.map((entry, index) => {
+    const code = entry.code ? `#${escapeHtml(entry.code)}` : "未识别编号";
+    const title = String(entry.title ?? "").trim();
+    return `${index + 1}．${code}${title ? ` · ${escapeHtml(title)}` : ""}`;
+  });
+  return [
+    `<b>确认清理 ${entries.length} 条待审核收录？</b>`,
+    "",
+    ...labels,
+    "",
+    "将只删除这些媒体目录记录、其频道映射和待审核项；不会删除 Telegram 频道消息，也不会影响其他已审核资源或剧情。",
+  ].join("\n");
+}
+
+function formatPendingReviewCleanupResult(result) {
+  if (result.outcome === "cleanup_session_missing") {
+    return "未执行清理：确认已失效，请重新输入 /reviews 后再次操作。";
+  }
+  if (result.outcome === "nothing_to_clean") {
+    return "未执行清理：确认页中的待审核记录已不存在或已被处理。";
+  }
+  return `✅ 已清理 ${result.deleted_count} 条待审核目录记录，并写入审计。Telegram 频道消息未删除。`;
 }
 
 function encodeDuplicateDeletionCallback(action, mediaId) {

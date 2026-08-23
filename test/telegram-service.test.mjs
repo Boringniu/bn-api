@@ -571,7 +571,61 @@ test("reviews command is admin-only and shows pending reasons without internal I
   assert.ok(reply.includes("编号格式需要确认"));
   assert.ok(reply.includes("ADN405X"));
   assert.ok(!reply.includes("media_"));
+  assert.deepEqual(calls[1].body.reply_markup, {
+    inline_keyboard: [[{
+      text: "清理当前 2 条待审核收录",
+      callback_data: "revclean:p",
+    }]],
+  });
   assert.ok(adminDb.statements[0].sql.includes("FROM review_items r"));
+});
+
+test("pending review cleanup requires a second confirmation and never deletes a channel message", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+  const db = new FakeD1({
+    allResults: [[{
+      media_id: "media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      normalized_code: null,
+      title: "已失效的历史收录",
+      media_status: "pending",
+      created_at: "2026-08-24T00:00:00Z",
+      updated_at: "2026-08-24T00:00:00Z",
+      tg_chat_id: "-1004460339207",
+      tg_message_id: 99,
+      pending_review_count: 1,
+    }]],
+  });
+
+  await service.handleUpdate(
+    db,
+    {
+      callback_query: {
+        id: "pending-cleanup-prompt",
+        data: "revclean:p",
+        from: { id: 2002 },
+        message: { message_id: 90, chat: { id: 111, type: "private" } },
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" },
+  );
+
+  assert.deepEqual(calls.map((call) => call.method), ["answerCallbackQuery", "sendMessage"]);
+  assert.match(calls[1].body.text, /确认清理 1 条待审核收录/);
+  assert.match(calls[1].body.text, /不会删除 Telegram 频道消息/);
+  assert.deepEqual(calls[1].body.reply_markup, {
+    inline_keyboard: [[
+      { text: "确认清理这些记录", callback_data: "revclean:c" },
+      { text: "取消", callback_data: "revclean:x" },
+    ]],
+  });
+  assert.ok(db.statements.some((statement) => statement.sql.includes("pending_media_cleanup_sessions")));
+  assert.ok(!db.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ? AND status = 'pending'"));
 });
 
 test("duplicates command is admin-only and only renders review candidates", async () => {
