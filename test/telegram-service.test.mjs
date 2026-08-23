@@ -1192,6 +1192,7 @@ test("admin story selection commits all checked videos in one operation", async 
 test("admin private forward from the configured legacy channel is indexed then deleted", async () => {
   const telegramCalls = [];
   const ingestCalls = [];
+  const storySelections = [];
   const service = createTelegramService({
     categoryConfig: configs.get("category").data,
     displayConfig,
@@ -1203,6 +1204,15 @@ test("admin private forward from the configured legacy channel is indexed then d
     },
     searchConfig: configs.get("search").data,
     searchService: createSearchStub(),
+    storyService: {
+      async getSession() {
+        return { mode: "awaiting_media_query", story_id: "story_dddddddddddddddddddddddddddddddd" };
+      },
+      async selectMediaForActiveStory(_db, input) {
+        storySelections.push(input);
+        return { outcome: "selected", selected_count: 1 };
+      },
+    },
     versionConfig,
     fetchImpl: async (url, init) => {
       telegramCalls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
@@ -1235,14 +1245,17 @@ test("admin private forward from the configured legacy channel is indexed then d
   );
 
   assert.equal(result.private_copy_deleted, true);
+  assert.equal(result.story_selection, "selected");
+  assert.deepEqual(storySelections, [{ userId: "222", mediaId: "media_legacy_1" }]);
   assert.equal(result.source_channel_message_id, 777);
   assert.equal(ingestCalls.length, 1);
   assert.equal(ingestCalls[0].source.external_id, "-1004460339207:777");
   assert.equal(ingestCalls[0].code, "ADN-001");
   assert.deepEqual(ingestCalls[0].raw_tags, ["人妻"]);
-  assert.deepEqual(telegramCalls.map((call) => call.method), ["deleteMessage", "sendMessage"]);
+  assert.deepEqual(telegramCalls.map((call) => call.method), ["deleteMessage", "sendMessage", "sendMessage"]);
   assert.equal(telegramCalls[0].body.message_id, 12);
   assert.ok(telegramCalls[1].body.text.includes("已收录 #ADN-001"));
+  assert.equal(telegramCalls[2].body.text, "✅ 已从频道加入本次已选视频（当前 1 部）。");
   assert.ok(
     db.statements.some((statement) =>
       typeof statement.sql === "string" &&

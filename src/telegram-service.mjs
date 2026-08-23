@@ -335,7 +335,29 @@ export function createTelegramService({
       const userId = String(message.from?.id ?? "");
       if (isLegacyChannelForward(message, env)) {
         const isUserAdmin = await this.isAuthorizedAdmin(userId, env);
-        return this.ingestLegacyPrivateForward(db, message, env, isUserAdmin);
+        const result = await this.ingestLegacyPrivateForward(db, message, env, isUserAdmin);
+        const session = isUserAdmin && storyService
+          ? await storyService.getSession(db, userId)
+          : null;
+        if (session?.mode !== "awaiting_media_query" || !result?.ingested) {
+          return result;
+        }
+        const selected = await storyService.selectMediaForActiveStory(db, {
+          userId,
+          mediaId: result.ingested,
+        });
+        if (selected.outcome === "selected" || selected.outcome === "already_selected") {
+          await this.callTelegram(env, "sendMessage", {
+            chat_id: chatId,
+            text: `✅ 已从频道加入本次已选视频（当前 ${selected.selected_count} 部）。`,
+          });
+        } else if (selected.outcome === "media_not_found") {
+          await this.callTelegram(env, "sendMessage", {
+            chat_id: chatId,
+            text: "该频道视频已接收，但尚未处于可关联状态。",
+          });
+        }
+        return { ...result, story_selection: selected.outcome };
       }
       const text = message.text?.trim();
       if (!text) {
@@ -1761,7 +1783,7 @@ export function createTelegramService({
   }
 
   function formatStoryManagementPrompt(story) {
-    return `<b>正在管理：</b>${escapeHtml(story.title)}【${story.video_count}】\n\n请直接输入番号、番号前缀、演员名或 #话题。结果中可一次勾选多部视频，最后点击“加入已选视频”统一关联。`;
+    return `<b>正在管理：</b>${escapeHtml(story.title)}【${story.video_count}】\n\n可直接转发当前频道中的视频到这里，Bot 会自动加入本次已选；也可输入番号、番号前缀、演员名或 #话题筛选。可一次勾选多部视频，最后点击“加入已选视频”统一关联。`;
   }
 
   function formatStoryMediaPage(story, page, renderResults) {

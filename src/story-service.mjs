@@ -200,6 +200,31 @@ export function createStoryService({ searchService }) {
       return { ...session, query: nextQuery, page: normalizePage(page) };
     },
 
+    async selectMediaForActiveStory(db, { userId, mediaId }) {
+      const session = await this.getSession(db, userId);
+      if (!session || session.mode !== "awaiting_media_query" || !isMediaId(mediaId)) {
+        return { outcome: "no_active_story", selected_count: 0 };
+      }
+      const media = await searchService.getMedia(db, mediaId, { includeChannelLinks: true });
+      if (!media) {
+        return { outcome: "media_not_found", selected_count: session.selected_count };
+      }
+      const inserted = await db
+        .prepare(
+          `INSERT INTO story_series_session_media (tg_user_id, media_id, selected_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT (tg_user_id, media_id) DO NOTHING`,
+        )
+        .bind(normalizeUserId(userId), media.id, new Date().toISOString())
+        .run();
+      const changes = inserted?.meta?.changes ?? inserted?.changes ?? 0;
+      return {
+        outcome: changes > 0 ? "selected" : "already_selected",
+        media,
+        selected_count: await countSelectedMedia(db, userId),
+      };
+    },
+
     async toggleMediaSelection(db, { userId, mediaId }) {
       const session = await this.getSession(db, userId);
       if (!session || session.mode !== "awaiting_media_query" || !isMediaId(mediaId)) {
