@@ -182,7 +182,9 @@ export function createTelegramService({
           reply = "权限不足";
         } else {
           const candidates = await this.listDuplicateCandidates(db);
-          reply = formatDuplicateCandidates(candidates);
+          reply = formatDuplicateCandidates(candidates, {
+            currentChannelId: env.TELEGRAM_CHANNEL_ID,
+          });
         }
       } else if (command === "/delete") {
         if (!isUserAdmin) {
@@ -887,6 +889,33 @@ export function createTelegramService({
         )
         .run();
 
+      const currentChannelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
+      const isLegacyChannelCandidate =
+        Boolean(currentChannelId) &&
+        String(candidate.tg_chat_id) !== currentChannelId;
+
+      // 历史频道遗留记录不能由当前频道的 Bot 安全删除。管理员已显式确认后，
+      // 只删除本目录中的残留媒体记录；绝不对旧频道消息发起删除请求。
+      if (isLegacyChannelCandidate) {
+        const completedAt = new Date().toISOString();
+        await db.batch([
+          db.prepare("DELETE FROM media WHERE id = ?").bind(candidate.media_id),
+          db
+            .prepare(`
+              UPDATE duplicate_deletion_audit
+              SET outcome = 'completed', deletion_scope = 'legacy_catalog_only',
+                  catalog_deleted_at = ?, error_message = ?
+              WHERE audit_token = ?
+            `)
+            .bind(
+              completedAt,
+              "Legacy-channel message was intentionally not deleted; catalog record removed.",
+              auditToken,
+            ),
+        ]);
+        return { outcome: "legacy_catalog_only_completed", candidate };
+      }
+
       try {
         await this.callTelegram(env, "deleteMessage", {
           chat_id: candidate.tg_chat_id,
@@ -1359,7 +1388,7 @@ function groupRowsBy(rows, key) {
   return groups;
 }
 
-function formatDuplicateCandidates(groups) {
+function formatDuplicateCandidates(groups, { currentChannelId = "" } = {}) {
   if (groups.size === 0) {
     return "✅ 未发现重复 Telegram 文件候选。";
   }
@@ -1376,7 +1405,11 @@ function formatDuplicateCandidates(groups) {
         ? `<a href="${escapeHtml(channelUrl)}">${escapeHtml(code)}</a>`
         : escapeHtml(code);
       const title = row.title ? ` · ${escapeHtml(row.title)}` : "";
-      lines.push(`• ${heading}${title}`);
+      const legacyNotice =
+        currentChannelId && String(row.tg_chat_id) !== String(currentChannelId)
+          ? " · <i>旧频道遗留：仅删除目录</i>"
+          : " · <i>当前频道：删除消息与目录</i>";
+      lines.push(`• ${heading}${title}${legacyNotice}`);
       lines.push(`<code>/delete ${escapeHtml(row.media_id)} CONFIRM</code>`);
     }
   }
@@ -1397,6 +1430,9 @@ function formatDuplicateDeletionResult(result) {
     : "该媒体";
   if (result.outcome === "telegram_delete_failed") {
     return `未删除 ${code}：频道消息删除失败，索引记录已保留。`;
+  }
+  if (result.outcome === "legacy_catalog_only_completed") {
+    return `✅ 已删除 ${code} 的旧频道遗留目录记录；旧频道原消息未操作，并已写入删除审计。`;
   }
   return `✅ 已删除 ${code} 的频道消息与索引记录，并已写入删除审计。`;
 }

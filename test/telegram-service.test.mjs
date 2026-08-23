@@ -533,7 +533,7 @@ test("duplicates command is admin-only and only renders review candidates", asyn
           tg_file_unique_id: "same-file",
           normalized_code: "ADN-100",
           title: "候选标题 B",
-          tg_chat_id: "-1004460339207",
+          tg_chat_id: "-1009988776655",
           tg_message_id: 18,
         },
       ],
@@ -542,12 +542,18 @@ test("duplicates command is admin-only and only renders review candidates", asyn
   await service.handleUpdate(
     adminDb,
     { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/duplicates" } },
-    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" },
+    {
+      TELEGRAM_BOT_TOKEN: "bot-token",
+      TELEGRAM_ADMIN_IDS: "2002",
+      TELEGRAM_CHANNEL_ID: "-1004460339207",
+    },
   );
   assert.ok(calls[1].body.text.includes("重复候选"));
   assert.ok(calls[1].body.text.includes("未执行合并或删除"));
   assert.ok(calls[1].body.text.includes("https://t.me/c/4460339207/17"));
   assert.ok(calls[1].body.text.includes("候选标题 A"));
+  assert.ok(calls[1].body.text.includes("当前频道：删除消息与目录"));
+  assert.ok(calls[1].body.text.includes("旧频道遗留：仅删除目录"));
   assert.ok(calls[1].body.text.includes("/delete media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CONFIRM"));
   assert.equal(
     adminDb.statements.filter((statement) => /^(INSERT|UPDATE|DELETE)/iu.test(statement.sql.trim())).length,
@@ -577,7 +583,11 @@ test("delete command requires explicit confirmation and preserves records when T
       return { json: async () => response };
     },
   });
-  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "2002" };
+  const env = {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_ADMIN_IDS: "2002",
+    TELEGRAM_CHANNEL_ID: "-1004460339207",
+  };
 
   await service.handleUpdate(
     new FakeD1(),
@@ -618,6 +628,33 @@ test("delete command requires explicit confirmation and preserves records when T
   assert.ok(failedCalls.at(-1).body.text.includes("索引记录已保留"));
   assert.ok(failedDb.statements.some((statement) => statement.sql.includes("telegram_delete_failed")));
   assert.ok(!failedDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
+
+  const legacyCalls = [];
+  const legacyService = createService({
+    fetchImpl: async (url, init) => {
+      legacyCalls.push({
+        method: url.split("/").at(-1),
+        body: JSON.parse(init.body),
+      });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+  const legacyCandidate = {
+    ...candidate,
+    media_id: "media_cccccccccccccccccccccccccccccccc",
+    tg_chat_id: "-1009988776655",
+    tg_message_id: 99,
+  };
+  const legacyDb = new FakeD1({ firstResults: [legacyCandidate] });
+  await legacyService.handleUpdate(
+    legacyDb,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete media_cccccccccccccccccccccccccccccccc CONFIRM" } },
+    env,
+  );
+  assert.ok(!legacyCalls.some((call) => call.method === "deleteMessage"));
+  assert.ok(legacyCalls.at(-1).body.text.includes("旧频道遗留目录记录"));
+  assert.ok(legacyDb.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
+  assert.ok(legacyDb.statements.some((statement) => statement.sql.includes("legacy_catalog_only")));
 });
 
 test("refresh command rejects non-admins and permits configured admins", async () => {
