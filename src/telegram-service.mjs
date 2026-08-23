@@ -139,8 +139,8 @@ export function createTelegramService({
       }
       const chatId = message.chat.id;
       const userId = String(message.from?.id ?? "");
-      const isUserAdmin = isAdmin(userId, env);
       if (isLegacyChannelForward(message, env)) {
+        const isUserAdmin = await this.isAuthorizedAdmin(userId, env);
         return this.ingestLegacyPrivateForward(db, message, env, isUserAdmin);
       }
       const text = message.text?.trim();
@@ -148,6 +148,10 @@ export function createTelegramService({
         return null;
       }
 
+      const needsAdminCheck = ["/stats", "/duplicates", "/refresh"].includes(text);
+      const isUserAdmin = needsAdminCheck
+        ? await this.isAuthorizedAdmin(userId, env)
+        : false;
       let reply;
       let replyMarkup = null;
       if (text === "/stats") {
@@ -688,6 +692,29 @@ export function createTelegramService({
         pending_update_count: info.pending_update_count ?? 0,
         channel_member: channelMember,
       };
+    },
+
+    async isAuthorizedAdmin(userId, env) {
+      if (isConfiguredAdmin(userId, env)) {
+        return true;
+      }
+      const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
+      if (!userId || !channelId) {
+        return false;
+      }
+      try {
+        const member = await this.callTelegram(env, "getChatMember", {
+          chat_id: channelId,
+          user_id: userId,
+        });
+        return ["creator", "owner", "administrator"].includes(member?.status);
+      } catch (error) {
+        console.warn("channel administrator lookup failed", {
+          user_id: userId,
+          message: error.message,
+        });
+        return false;
+      }
     },
 
     async getCatalogStats(db, { includeAdmin = false } = {}) {
@@ -1800,7 +1827,7 @@ function buildEditedChannelPayload({
   return payload;
 }
 
-function isAdmin(userId, env) {
+function isConfiguredAdmin(userId, env) {
   const admins = (env.TELEGRAM_ADMIN_IDS ?? "")
     .split(",")
     .map((value) => value.trim())

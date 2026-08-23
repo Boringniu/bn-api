@@ -577,7 +577,8 @@ test("refresh command rejects non-admins and permits configured admins", async (
     },
     env,
   );
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].method, "getChatMember");
   assert.equal(calls.at(-1).body.text, "权限不足");
 
   const adminDb = new FakeD1({
@@ -600,6 +601,56 @@ test("refresh command rejects non-admins and permits configured admins", async (
   );
   assert.ok(calls.some((call) => call.method === "pinChatMessage"));
   assert.equal(calls.at(-1).body.text, "✅ 置顶索引已刷新");
+});
+
+test("channel administrators receive bot admin permissions while regular members do not", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      const body = JSON.parse(init.body);
+      calls.push({ method, body });
+      const result = method === "getChatMember"
+        ? { status: body.user_id === "7001" ? "administrator" : "member" }
+        : { message_id: 1 };
+      return { json: async () => ({ ok: true, result }) };
+    },
+  });
+  const env = {
+    TELEGRAM_BOT_TOKEN: "bot-token",
+    TELEGRAM_CHANNEL_ID: "-1004460339207",
+  };
+  const adminDb = new FakeD1({
+    allResults: [[{
+      tg_file_unique_id: "same-file",
+      normalized_code: "ADN-100",
+      title: "候选标题",
+      tg_chat_id: "-1004460339207",
+      tg_message_id: 17,
+    }, {
+      tg_file_unique_id: "same-file",
+      normalized_code: "ADN-100",
+      title: "候选标题副本",
+      tg_chat_id: "-1004460339207",
+      tg_message_id: 18,
+    }]],
+  });
+  await service.handleUpdate(
+    adminDb,
+    { message: { chat: { id: 111, type: "private" }, from: { id: 7001 }, text: "/duplicates" } },
+    env,
+  );
+  assert.equal(calls[0].method, "getChatMember");
+  assert.deepEqual(calls[0].body, { chat_id: "-1004460339207", user_id: "7001" });
+  assert.ok(calls.at(-1).body.text.includes("重复候选"));
+
+  await service.handleUpdate(
+    new FakeD1(),
+    { message: { chat: { id: 111, type: "private" }, from: { id: 7002 }, text: "/duplicates" } },
+    env,
+  );
+  assert.equal(calls.at(-2).method, "getChatMember");
+  assert.equal(calls.at(-1).body.text, "权限不足");
 });
 
 test("private bot gives a specific message for recognized but uncollected searches", async () => {
