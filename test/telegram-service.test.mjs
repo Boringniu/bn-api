@@ -452,6 +452,12 @@ test("about command explains the direct query workflow", async () => {
   assert.ok(calls[0].body.text.includes("BN·media"));
   assert.ok(calls[0].body.text.includes("ADN-100、ADN、白雪、#剧情"));
   assert.ok(calls[0].body.text.includes("/stats - 查看收录统计"));
+  assert.deepEqual(calls[0].body.reply_markup, {
+    keyboard: [[{ text: "系列剧情" }]],
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: "输入番号、演员、话题，或点击系列剧情",
+  });
 });
 
 test("stats command shows public catalog totals and admin quality metrics", async () => {

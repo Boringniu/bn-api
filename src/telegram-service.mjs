@@ -8,6 +8,12 @@ const INDEX_ITEMS_PER_BLOCK = 24;
 const BOT_DESCRIPTION_LIMIT = 240;
 const STORY_LIST_COMMANDS = new Set(["/系列剧情", "系列剧情", "/stories"]);
 const STORY_CREATE_COMMANDS = new Set(["/新增剧情", "新增剧情", "/newstory"]);
+const STORY_BROWSE_KEYBOARD = Object.freeze({
+  keyboard: [[{ text: "系列剧情" }]],
+  resize_keyboard: true,
+  is_persistent: true,
+  input_field_placeholder: "输入番号、演员、话题，或点击系列剧情",
+});
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
@@ -364,6 +370,7 @@ export function createTelegramService({
           "/duplicates - 查看重复候选（管理员）\n" +
           "/delete - 打开删除候选（管理员）\n" +
           "/refresh - 刷新频道索引（管理员）";
+        replyMarkup = STORY_BROWSE_KEYBOARD;
       } else if (isStoryListCommand) {
         if (!storyService) {
           reply = "系列剧情功能暂不可用。";
