@@ -1176,6 +1176,40 @@ test("newstory starts title entry then creates an empty top-level story for admi
   });
 });
 
+test("title entry preserves known commands and rejects slash-prefixed titles", async () => {
+  const calls = [];
+  const created = [];
+  const storyService = {
+    async getSession() { return { mode: "awaiting_title" }; },
+    async createStory(_db, value) { created.push(value); return null; },
+    async clearSession() {},
+  };
+  const service = createService({
+    storyService,
+    fetchImpl: async (url, init) => {
+      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: true }) };
+    },
+  });
+  const db = new FakeD1();
+  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_ADMIN_IDS: "222" };
+
+  await service.handleUpdate(db, {
+    message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/duplicates" },
+  }, env);
+  assert.equal(calls[0].body.text, "✅ 未发现重复 Telegram 文件候选。");
+  assert.deepEqual(created, []);
+
+  await service.handleUpdate(db, {
+    message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/unknown" },
+  }, env);
+  assert.equal(calls[1].body.text, "正在输入一级剧情名称。请发送普通文字，或点击取消。");
+  assert.deepEqual(calls[1].body.reply_markup, {
+    inline_keyboard: [[{ text: "取消", callback_data: "story:x" }]],
+  });
+  assert.deepEqual(created, []);
+});
+
 test("story deletion requires a second confirmation and only removes the story relation", async () => {
   const calls = [];
   const story = {

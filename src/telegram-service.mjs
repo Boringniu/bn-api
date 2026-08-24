@@ -578,9 +578,34 @@ export function createTelegramService({
             replyMarkup = buildStoryEntryCancelMarkup();
           }
         }
+      } else if (text === "/duplicates") {
+        if (!isUserAdmin) {
+          reply = "权限不足";
+        } else {
+          const candidates = await this.listDuplicateCandidates(db);
+          reply = formatDuplicateCandidates(candidates, {
+            currentChannelId: env.TELEGRAM_CHANNEL_ID,
+          });
+          replyMarkup = buildDuplicateCandidateMarkup(candidates);
+        }
+      } else if (text === "/refresh") {
+        if (!isUserAdmin) {
+          reply = "权限不足";
+        } else {
+          try {
+            await this.refreshPinnedIndex(db, env);
+            reply = "✅ 置顶索引已刷新";
+          } catch (err) {
+            console.error("refresh failed", err);
+            reply = "❌ 刷新失败：" + err.message;
+          }
+        }
       } else if (storySession?.mode === "awaiting_title") {
         if (!isUserAdmin || !storyService) {
           reply = "权限不足";
+        } else if (text.startsWith("/")) {
+          reply = "正在输入一级剧情名称。请发送普通文字，或点击取消。";
+          replyMarkup = buildStoryEntryCancelMarkup();
         } else {
           const created = await storyService.createStory(db, {
             title: text,
@@ -609,28 +634,6 @@ export function createTelegramService({
               selectedCount: selectedMediaIds.length,
             });
             replyMarkup = buildStorySelectionMarkup(story, search.result, selectedMediaIds);
-          }
-        }
-      } else if (text === "/duplicates") {
-        if (!isUserAdmin) {
-          reply = "权限不足";
-        } else {
-          const candidates = await this.listDuplicateCandidates(db);
-          reply = formatDuplicateCandidates(candidates, {
-            currentChannelId: env.TELEGRAM_CHANNEL_ID,
-          });
-          replyMarkup = buildDuplicateCandidateMarkup(candidates);
-        }
-      } else if (text === "/refresh") {
-        if (!isUserAdmin) {
-          reply = "权限不足";
-        } else {
-          try {
-            await this.refreshPinnedIndex(db, env);
-            reply = "✅ 置顶索引已刷新";
-          } catch (err) {
-            console.error("refresh failed", err);
-            reply = "❌ 刷新失败：" + err.message;
           }
         }
       } else {
