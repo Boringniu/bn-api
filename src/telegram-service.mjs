@@ -2232,9 +2232,9 @@ export function createTelegramService({
   }
 
   function formatStoryList() {
-    // Telegram 的内联按钮必须附着在一条非空消息上；使用不可见分隔符，
-    // 使目录界面只呈现下方剧情按钮而不显示额外标题或正文。
-    return "\u2063";
+    // Telegram 的内联按钮必须附着在一条非空消息上；使用简短标题，
+    // 清楚说明下方为可点选的剧情目录。
+    return "系列剧情目录";
   }
 
   function formatStoryCreated({ story, created }) {

@@ -1096,8 +1096,7 @@ test("series stories list top-level entries and reuse standard clickable search 
     message: { chat: { id: 111, type: "private" }, from: { id: 222 }, text: "/stories" },
   }, { TELEGRAM_BOT_TOKEN: "bot-token" });
 
-  assert.equal(calls[0].body.text, "\u2063");
-  assert.ok(!calls[0].body.text.includes("系列剧情"));
+  assert.equal(calls[0].body.text, "系列剧情目录");
   assert.ok(!calls[0].body.text.includes("我同情我那30岁还是处男的妹夫"));
   assert.deepEqual(calls[0].body.reply_markup, {
     inline_keyboard: [[{
