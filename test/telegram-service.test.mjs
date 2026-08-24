@@ -450,7 +450,10 @@ test("about command explains the direct query workflow", async () => {
 
   assert.equal(calls[0].method, "sendMessage");
   assert.ok(calls[0].body.text.includes("BN·media"));
-  assert.ok(calls[0].body.text.includes("ADN-100、ADN、白雪、#剧情"));
+  assert.ok(calls[0].body.text.includes("ADN-100、ADN、#剧情"));
+  assert.ok(!calls[0].body.text.includes("白雪"));
+  assert.ok(!calls[0].body.text.includes("/系列剧情"));
+  assert.ok(!calls[0].body.text.includes("/新增剧情"));
   assert.ok(calls[0].body.text.includes("/stats - 查看收录统计"));
   assert.ok(calls[0].body.text.includes("/reviews - 查看待审核明细（管理员）"));
   assert.deepEqual(calls[0].body.reply_markup, {

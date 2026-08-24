@@ -542,11 +542,9 @@ export function createTelegramService({
         reply =
           "BN·media\n\n" +
           "可直接输入：番号、番号前缀、演员名或 #话题。\n" +
-          "例如：ADN-100、ADN、白雪、#剧情\n\n" +
+          "例如：ADN-100、ADN、#剧情\n\n" +
           "/stats - 查看收录统计\n" +
           "/index - 浏览频道索引\n" +
-          "/系列剧情 - 浏览系列剧情\n" +
-          "/新增剧情 - 新增一级剧情（管理员）\n" +
           "/duplicates - 查看重复候选（管理员）\n" +
           "/reviews - 查看待审核明细（管理员）\n" +
           "/refresh - 刷新频道索引（管理员）";
