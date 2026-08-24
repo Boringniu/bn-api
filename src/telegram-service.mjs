@@ -509,7 +509,7 @@ export function createTelegramService({
       const storySession = storyService
         ? await storyService.getSession(db, userId)
         : null;
-      const needsAdminCheck = ["/stats", "/duplicates", "/delete", "/refresh"].includes(command)
+      const needsAdminCheck = ["/stats", "/duplicates", "/refresh"].includes(command)
         || isReviewListCommand
         || isStoryCreateCommand
         || Boolean(storySession);
@@ -549,7 +549,6 @@ export function createTelegramService({
           "/新增剧情 - 新增一级剧情（管理员）\n" +
           "/duplicates - 查看重复候选（管理员）\n" +
           "/reviews - 查看待审核明细（管理员）\n" +
-          "/delete - 打开删除候选（管理员）\n" +
           "/refresh - 刷新频道索引（管理员）";
         replyMarkup = STORY_BROWSE_KEYBOARD;
       } else if (isStoryListCommand) {
@@ -614,7 +613,7 @@ export function createTelegramService({
             replyMarkup = buildStorySelectionMarkup(story, search.result, selectedMediaIds);
           }
         }
-      } else if (text === "/duplicates" || command === "/delete") {
+      } else if (text === "/duplicates") {
         if (!isUserAdmin) {
           reply = "权限不足";
         } else {
@@ -1112,7 +1111,6 @@ export function createTelegramService({
           { command: "newstory", description: "新增一级剧情（管理员）" },
           { command: "duplicates", description: "查看重复候选（管理员）" },
           { command: "reviews", description: "查看待审核明细（管理员）" },
-          { command: "delete", description: "删除重复候选（管理员）" },
           { command: "refresh", description: "刷新频道索引（管理员）" },
           { command: "about", description: "简介说明" },
         ],

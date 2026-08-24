@@ -693,44 +693,6 @@ test("duplicates command is admin-only and only renders review candidates", asyn
   );
 });
 
-test("delete command opens an ID-free duplicate candidate list", async () => {
-  const calls = [];
-  const service = createService({
-    fetchImpl: async (url, init) => {
-      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
-      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
-    },
-  });
-  const db = new FakeD1({
-    allResults: [[{
-      media_id: "media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      tg_file_unique_id: "same-file",
-      normalized_code: "ADN-100",
-      title: "候选标题",
-      tg_chat_id: "-1004460339207",
-      tg_message_id: 17,
-    }]],
-  });
-  await service.handleUpdate(
-    db,
-    { message: { chat: { id: 111, type: "private" }, from: { id: 2002 }, text: "/delete" } },
-    {
-      TELEGRAM_BOT_TOKEN: "bot-token",
-      TELEGRAM_ADMIN_IDS: "2002",
-      TELEGRAM_CHANNEL_ID: "-1004460339207",
-    },
-  );
-  assert.ok(calls[0].body.text.includes("重复候选"));
-  assert.ok(!calls[0].body.text.includes("media_"));
-  assert.deepEqual(calls[0].body.reply_markup, {
-    inline_keyboard: [[{
-      text: "删除 #ADN-100 · 候选标题",
-      callback_data: "dupdel:d:media_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    }]],
-  });
-  assert.ok(!db.statements.some((statement) => statement.sql === "DELETE FROM media WHERE id = ?"));
-});
-
 test("duplicate deletion routine preserves records when Telegram deletion fails", async () => {
   const calls = [];
   const candidate = {
@@ -2051,7 +2013,6 @@ test("configures webhook to receive channel posts and channel edits", async () =
       { command: "newstory", description: "新增一级剧情（管理员）" },
       { command: "duplicates", description: "查看重复候选（管理员）" },
       { command: "reviews", description: "查看待审核明细（管理员）" },
-      { command: "delete", description: "删除重复候选（管理员）" },
       { command: "refresh", description: "刷新频道索引（管理员）" },
       { command: "about", description: "简介说明" },
     ],
