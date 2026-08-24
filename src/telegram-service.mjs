@@ -20,6 +20,7 @@ const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
 const PENDING_FORWARD_GROUP_PREFIX = "channel_pending_forward_group:";
 const PENDING_PRIVATE_FORWARD_GROUP_PREFIX = "private_forward_group:";
 const DEFAULT_MEDIA_GROUP_SETTLE_MS = 2_000;
+const PENDING_FORWARD_GROUP_STALE_MS = 5 * 60_000;
 
 export function createTelegramService({
   categoryConfig,
@@ -717,10 +718,10 @@ export function createTelegramService({
           rawText,
           privateMessageIds,
         });
-        await deletePendingPrivateForwardGroup(db, groupKey);
+        await deletePendingForwardGroup(db, groupKey);
         return { ...result, media_group_id: message.media_group_id };
       } catch (error) {
-        await deletePendingPrivateForwardGroup(db, groupKey);
+        await deletePendingForwardGroup(db, groupKey);
         throw error;
       }
     },
@@ -905,8 +906,8 @@ export function createTelegramService({
       await delay(mediaGroupSettleMs);
 
       const posts = sortChannelPosts(await readPendingForwardGroup(db, groupKey));
-      const lastMessageId = posts.at(-1)?.message_id;
-      if (Number(post.message_id) !== lastMessageId) {
+      const latestPost = latestPendingForwardPost(posts);
+      if (Number(post.message_id) !== Number(latestPost?.message_id)) {
         return {
           buffered: true,
           media_group_id: post.media_group_id,
@@ -917,43 +918,47 @@ export function createTelegramService({
         return { buffered: true, media_group_id: post.media_group_id };
       }
 
-      const copiedMessageIds = await this.stripForwardMediaGroup(
-        posts,
-        channelId,
-        env,
-      );
-
-      await writePendingForwardGroupState(db, groupKey, "processed");
-      const outcomes = [];
-      for (const [index, source] of posts.entries()) {
-        const copiedPost = copiedChannelPost(source, copiedMessageIds[index]);
-        // 相册的 caption 只会出现在其中一条消息上。复制后先保存它，
-        // 让同组后续视频也能继承人工填写的番号与原生话题。
-        await storePendingChannelContext(db, copiedPost, channelId);
-        outcomes.push(
-          await this.handleChannelPost(
-            db,
-            copiedPost,
-            env,
-            { skipIndexRefresh: true },
-          ),
+      try {
+        const copiedMessageIds = await this.stripForwardMediaGroup(
+          posts,
+          channelId,
+          env,
         );
-      }
-      if (outcomes.some((outcome) => outcome?.status === "approved")) {
-        try {
-          await this.refreshPinnedIndex(db, env);
-        } catch (error) {
-          console.warn("pinned index refresh failed after media group copy", {
-            message: error.message,
-          });
+        const outcomes = [];
+        for (const [index, source] of posts.entries()) {
+          const copiedPost = copiedChannelPost(source, copiedMessageIds[index]);
+          // 相册的 caption 只会出现在其中一条消息上。复制后先保存它，
+          // 让同组后续视频也能继承人工填写的番号与原生话题。
+          await storePendingChannelContext(db, copiedPost, channelId);
+          outcomes.push(
+            await this.handleChannelPost(
+              db,
+              copiedPost,
+              env,
+              { skipIndexRefresh: true },
+            ),
+          );
         }
+        if (outcomes.some((outcome) => outcome?.status === "approved")) {
+          try {
+            await this.refreshPinnedIndex(db, env);
+          } catch (error) {
+            console.warn("pinned index refresh failed after media group copy", {
+              message: error.message,
+            });
+          }
+        }
+        return {
+          source_stripped: true,
+          media_group_id: post.media_group_id,
+          copied_message_ids: copiedMessageIds,
+          processed: outcomes.filter(Boolean).length,
+        };
+      } finally {
+        // 无论复制、入库还是索引刷新是否失败，都不能让本次临时快照和
+        // processing 状态永久卡住后续同一相册的再次转发。
+        await deletePendingForwardGroup(db, groupKey);
       }
-      return {
-        source_stripped: true,
-        media_group_id: post.media_group_id,
-        copied_message_ids: copiedMessageIds,
-        processed: outcomes.filter(Boolean).length,
-      };
     },
 
     async stripForwardMediaGroup(posts, channelId, env) {
@@ -3134,12 +3139,30 @@ function snapshotChannelPost(post) {
 }
 
 function copiedChannelPost(source, messageId) {
+  const { _pending_received_at, ...post } = source;
   return {
-    ...source,
+    ...post,
     message_id: messageId,
     forward_origin: null,
     forward_from: null,
   };
+}
+
+function latestPendingForwardPost(posts) {
+  return posts.reduce((latest, post) => {
+    if (!latest) {
+      return post;
+    }
+    const latestAt = Date.parse(latest._pending_received_at ?? "");
+    const postAt = Date.parse(post._pending_received_at ?? "");
+    if (Number.isFinite(postAt) && (!Number.isFinite(latestAt) || postAt > latestAt)) {
+      return post;
+    }
+    if (postAt === latestAt && Number(post.message_id) > Number(latest.message_id)) {
+      return post;
+    }
+    return latest;
+  }, null);
 }
 
 function sortChannelPosts(posts) {
@@ -3150,7 +3173,7 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function deletePendingPrivateForwardGroup(db, key) {
+async function deletePendingForwardGroup(db, key) {
   const messagePrefix = `${key}:message:`;
   await db
     .prepare(
@@ -3164,31 +3187,20 @@ async function readPendingForwardGroup(db, key) {
   const messagePrefix = `${key}:message:`;
   const result = await db
     .prepare(
-      "SELECT value FROM database_metadata WHERE substr(key, 1, length(?)) = ? ORDER BY key",
+      "SELECT value, updated_at FROM database_metadata WHERE substr(key, 1, length(?)) = ? ORDER BY key",
     )
     .bind(messagePrefix, messagePrefix)
     .all();
   return (result.results ?? []).flatMap((row) => {
     try {
       const post = JSON.parse(row.value);
-      return Number.isInteger(Number(post?.message_id)) ? [post] : [];
+      return Number.isInteger(Number(post?.message_id))
+        ? [{ ...post, _pending_received_at: row.updated_at ?? null }]
+        : [];
     } catch {
       return [];
     }
   });
-}
-
-async function writePendingForwardGroupState(db, key, status) {
-  await db
-    .prepare(
-      `INSERT INTO database_metadata (key, value, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT (key) DO UPDATE SET
-         value = excluded.value,
-         updated_at = excluded.updated_at`,
-    )
-    .bind(pendingForwardGroupStateKey(key), status, new Date().toISOString())
-    .run();
 }
 
 async function claimPendingForwardGroup(db, key) {
@@ -3205,6 +3217,7 @@ async function claimPendingForwardGroup(db, key) {
 }
 
 async function appendPendingForwardGroup(db, key, post) {
+  await clearStalePendingForwardGroup(db, key);
   await db
     .prepare(
       `INSERT INTO database_metadata (key, value, updated_at)
@@ -3218,6 +3231,25 @@ async function appendPendingForwardGroup(db, key, post) {
     )
     .run();
   return readPendingForwardGroup(db, key);
+}
+
+async function clearStalePendingForwardGroup(db, key) {
+  const state = await db
+    .prepare("SELECT value, updated_at FROM database_metadata WHERE key = ?")
+    .bind(pendingForwardGroupStateKey(key))
+    .first();
+  if (!state?.value) {
+    return;
+  }
+  const staleBefore = new Date(Date.now() - PENDING_FORWARD_GROUP_STALE_MS).toISOString();
+  const isFinished = state.value === "processed";
+  const isStaleProcessing =
+    state.value === "processing" &&
+    typeof state.updated_at === "string" &&
+    state.updated_at < staleBefore;
+  if (isFinished || isStaleProcessing) {
+    await deletePendingForwardGroup(db, key);
+  }
 }
 
 async function storePendingChannelContext(db, post, channelId) {
@@ -3268,7 +3300,7 @@ async function readPendingChannelContext(db, channelId, messageId, code) {
       Number.isInteger(messageDistance) &&
       messageDistance > 0 &&
       messageDistance <= PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW;
-    const codeMatches = Boolean(context.code && (!code || code === context.code));
+    const codeMatches = !context.code || !code || code === context.code;
     if (!isNear || !codeMatches || !Array.isArray(context.raw_tags)) {
       return null;
     }
@@ -3360,7 +3392,7 @@ function buildEditedChannelPayload({
       external_id: `${channelId}:${post.message_id}`,
     },
     title: parsed.title,
-    raw_tags: rawTags.length > 0 ? rawTags : ["未分类"],
+    raw_tags: rawTags,
     metadata: {
       ...(previousPayload.metadata ?? {}),
       tg_file_id: video?.file_id ?? previousPayload.metadata?.tg_file_id,

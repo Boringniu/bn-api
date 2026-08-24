@@ -208,6 +208,162 @@ test("strips a forwarded media group in one copy to preserve album layout", asyn
   assert.equal(calls[2].payload.message_id, 71);
 });
 
+test("clears forwarded media-group pending snapshots after processing", async () => {
+  const telegramCalls = [];
+  const groupId = "channel_album_cleanup";
+  const firstPost = {
+    chat: { id: -1004460339207 },
+    message_id: 71,
+    media_group_id: groupId,
+    video: { file_id: "GROUP-1", file_name: "ADN-071.mp4" },
+  };
+  // Telegram 的 webhook 到达顺序未必与消息编号一致。该成员编号较小，
+  // 但最后收到，必须由它触发整组处理。
+  const lastPost = {
+    chat: { id: -1004460339207 },
+    message_id: 70,
+    media_group_id: groupId,
+    video: { file_id: "GROUP-2", file_name: "ADN-070.mp4" },
+  };
+  const storedPosts = [
+    { value: JSON.stringify(firstPost), updated_at: "2026-08-24T00:00:00.000Z" },
+    { value: JSON.stringify(lastPost), updated_at: "2026-08-24T00:00:01.000Z" },
+  ];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest() {
+        return { id: "media_group_cleanup", status: "pending" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    mediaGroupSettleMs: 0,
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      telegramCalls.push({ method, body: JSON.parse(init.body) });
+      const result = method === "copyMessages"
+        ? [{ message_id: 170 }, { message_id: 171 }]
+        : true;
+      return { json: async () => ({ ok: true, result }) };
+    },
+  });
+  const db = new FakeD1({
+    firstResults: [null],
+    allResults: [storedPosts, storedPosts],
+  });
+
+  await service.bufferForwardedMediaGroup(
+    db,
+    lastPost,
+    "-1004460339207",
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  const stateKey = `channel_pending_forward_group:-1004460339207:${groupId}:state`;
+  const cleanup = db.statements.find((statement) =>
+    statement.sql.startsWith("DELETE FROM database_metadata") &&
+    statement.values[0] === stateKey,
+  );
+  assert.ok(cleanup, "completed album must remove its state and member snapshots");
+  assert.deepEqual(telegramCalls.map((call) => call.method), [
+    "copyMessages",
+    "deleteMessage",
+    "deleteMessage",
+  ]);
+});
+
+test("releases a retained processed media-group state before a later forwarding", async () => {
+  const groupId = "channel_album_reuse";
+  const post = {
+    chat: { id: -1004460339207 },
+    message_id: 75,
+    media_group_id: groupId,
+    video: { file_id: "GROUP-REUSE", file_name: "ADN-075.mp4" },
+  };
+  const stored = [{ value: JSON.stringify(post) }];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: { async ingest() { return { id: "media_group_reuse", status: "pending" }; } },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    mediaGroupSettleMs: 0,
+    fetchImpl: async (url) => {
+      const method = url.split("/").at(-1);
+      const result = method === "copyMessages" ? [{ message_id: 175 }] : true;
+      return { json: async () => ({ ok: true, result }) };
+    },
+  });
+  const db = new FakeD1({
+    firstResults: [{ value: "processed", updated_at: "2026-08-24T00:00:00.000Z" }],
+    allResults: [stored, stored],
+  });
+
+  await service.bufferForwardedMediaGroup(
+    db,
+    post,
+    "-1004460339207",
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  const stateKey = `channel_pending_forward_group:-1004460339207:${groupId}:state`;
+  const cleanups = db.statements.filter((statement) =>
+    statement.sql.startsWith("DELETE FROM database_metadata") &&
+    statement.values[0] === stateKey,
+  );
+  assert.equal(cleanups.length, 2, "old processed state and new temporary state must both clear");
+});
+
+test("clears forwarded media-group pending snapshots when copying fails", async () => {
+  const groupId = "channel_album_failure";
+  const post = {
+    chat: { id: -1004460339207 },
+    message_id: 80,
+    media_group_id: groupId,
+    video: { file_id: "GROUP-FAIL", file_name: "ADN-080.mp4" },
+  };
+  const stored = [{ value: JSON.stringify(post) }];
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: { async ingest() { return { id: "unused", status: "pending" }; } },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+    mediaGroupSettleMs: 0,
+    fetchImpl: async () => ({
+      json: async () => ({ ok: false, description: "copy blocked" }),
+    }),
+  });
+  const db = new FakeD1({
+    firstResults: [null],
+    allResults: [stored, stored],
+  });
+
+  await assert.rejects(
+    () => service.bufferForwardedMediaGroup(
+      db,
+      post,
+      "-1004460339207",
+      { TELEGRAM_BOT_TOKEN: "bot-token" },
+    ),
+    /copyMessages failed/,
+  );
+
+  const stateKey = `channel_pending_forward_group:-1004460339207:${groupId}:state`;
+  assert.ok(
+    db.statements.some((statement) =>
+      statement.sql.startsWith("DELETE FROM database_metadata") &&
+      statement.values[0] === stateKey,
+    ),
+    "failed album copy must not leave a processing state behind",
+  );
+});
+
 test("rolls back the copy when deleting the forwarded original fails", async () => {
   const calls = [];
   const service = createService({
@@ -2408,6 +2564,52 @@ test("editing an indexed channel video synchronizes catalog metadata without rep
   );
 });
 
+test("editing a channel video without hashtags keeps raw tags empty", async () => {
+  const ingestCalls = [];
+  const previousPayload = {
+    source: { provider: "channel", external_id: "-1004460339207:101" },
+    title: "ADN-002 #旧标签",
+    raw_tags: ["旧标签"],
+    metadata: { tg_file_id: "FILE-2", tg_message_id: "101" },
+  };
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_edit_empty_tags", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+  });
+  const db = new FakeD1({
+    firstResults: [
+      { raw_payload_json: JSON.stringify(previousPayload) },
+      null,
+      null,
+    ],
+    batchResults: [[], [], []],
+  });
+
+  await service.handleUpdate(
+    db,
+    {
+      edited_channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 101,
+        caption: "ADN-002 更新后的说明",
+        video: { file_id: "FILE-2", file_name: "ADN-002.mp4" },
+      },
+    },
+    { TELEGRAM_CHANNEL_ID: "-1004460339207" },
+  );
+
+  assert.deepEqual(ingestCalls[0].raw_tags, []);
+});
+
 test("editing an unmapped private-channel video imports it without reposting", async () => {
   const telegramCalls = [];
   const ingestCalls = [];
@@ -2543,6 +2745,46 @@ test("inherits hashtags from a preceding channel context message", async () => {
 
   assert.equal(ingestCalls[0].code, "ADN-100");
   assert.deepEqual(ingestCalls[0].raw_tags, ["松下纱荣子"]);
+});
+
+test("inherits hashtags from a preceding channel context without a code", async () => {
+  const ingestCalls = [];
+  const context = {
+    message_id: 550,
+    code: null,
+    raw_tags: ["剧情", "单片"],
+  };
+  const service = createTelegramService({
+    categoryConfig: configs.get("category").data,
+    displayConfig,
+    ingestService: {
+      async ingest(_db, payload) {
+        ingestCalls.push(payload);
+        return { id: "media_topic_context", status: "approved" };
+      },
+    },
+    searchConfig: configs.get("search").data,
+    searchService: createSearchStub(),
+    versionConfig,
+  });
+  const db = new FakeD1({
+    firstResults: [null, { value: JSON.stringify(context) }, null, null],
+  });
+
+  await service.handleUpdate(
+    db,
+    {
+      channel_post: {
+        chat: { id: -1004460339207 },
+        message_id: 551,
+        video: { file_id: "TOPIC-CONTEXT", file_name: "ADN-101.mp4" },
+      },
+    },
+    { TELEGRAM_CHANNEL_ID: "-1004460339207" },
+  );
+
+  assert.equal(ingestCalls[0].code, "ADN-101");
+  assert.deepEqual(ingestCalls[0].raw_tags, ["剧情", "单片"]);
 });
 
 test("inherits a preceding code when the video file name has no code", async () => {
