@@ -26,8 +26,6 @@ const service = createIngestService({
   tagNormalizer: createTagNormalizer({
     aliasConfig: requireConfig("alias"),
     categoryConfig: requireConfig("category"),
-    ignoredConfig: requireConfig("ignored"),
-    reviewRulesConfig: requireConfig("review_rules"),
     tagDictionaryConfig: requireConfig("tag_dictionary"),
     versionConfig,
   }),

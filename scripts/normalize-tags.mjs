@@ -10,8 +10,6 @@ try {
   const normalizer = createTagNormalizer({
     aliasConfig: requireConfig(configs, "alias"),
     categoryConfig: requireConfig(configs, "category"),
-    ignoredConfig: requireConfig(configs, "ignored"),
-    reviewRulesConfig: requireConfig(configs, "review_rules"),
     tagDictionaryConfig: requireConfig(configs, "tag_dictionary"),
     versionConfig: requireConfig(configs, "version"),
   });

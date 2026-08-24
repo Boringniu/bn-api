@@ -12,18 +12,13 @@ const MATCH_MODE_RANK = {
 export function createTagNormalizer({
   aliasConfig,
   categoryConfig,
-  ignoredConfig,
-  reviewRulesConfig,
   tagDictionaryConfig,
   versionConfig,
 }) {
   assertConfig(aliasConfig, "aliasConfig");
   assertConfig(categoryConfig, "categoryConfig");
-  assertConfig(ignoredConfig, "ignoredConfig");
-  assertConfig(reviewRulesConfig, "reviewRulesConfig");
   assertConfig(tagDictionaryConfig, "tagDictionaryConfig");
   assertConfig(versionConfig, "versionConfig");
-  // Removed hardcoded policy assertions to allow more flexibility
 
   const categories = indexApprovedEntities(
     categoryConfig.items,
@@ -224,32 +219,10 @@ function buildValueMatchers({
   return matchers;
 }
 
-function buildIgnoredMatchers(ignoredConfig) {
-  return ignoredConfig.items
-    .filter(
-      (item) =>
-        item.status === APPROVED_STATUS &&
-        (item.scope.includes("tag") || item.scope.includes("category")),
-    )
-    .map((item) =>
-      createMatcher({
-        matchMode: item.match_mode,
-        pattern: item.normalized_value,
-        rawPattern: item.value,
-        reason: item.reason,
-        referenceId: item.ignore_id,
-        source: "ignored",
-        target: item,
-        targetType: "ignored",
-      }),
-    );
-}
-
 function createMatcher({
   matchMode,
   pattern,
   rawPattern,
-  reason = null,
   referenceId,
   source,
   target,
@@ -264,20 +237,12 @@ function createMatcher({
     matchMode,
     pattern,
     rank,
-    rawPattern,
-    reason,
     referenceId,
     regex: matchMode === "regex" ? new RegExp(rawPattern, "u") : null,
     source,
     target,
     targetType,
   };
-}
-
-function findBestMatch(matchers, rawValue, normalizedValue) {
-  return matchers
-    .filter((matcher) => matchesValue(matcher, rawValue, normalizedValue))
-    .sort(compareMatchers)[0];
 }
 
 function findTopValueMatches(matchers, rawValue, normalizedValue) {
@@ -400,48 +365,6 @@ function topicFingerprint(value) {
   return hash.toString(16).padStart(16, "0");
 }
 
-function addReview(
-  reviewIndex,
-  reviewRules,
-  { normalizedValues, rawValues, subjectType, trigger },
-) {
-  const definition = reviewRules.get(trigger);
-  if (!definition) {
-    throw new Error(`no enabled review rule for trigger: ${trigger}`);
-  }
-
-  const normalizedKey = [...new Set(normalizedValues)].sort().join("\0");
-  const key = `${definition.type}:${subjectType}:${normalizedKey}`;
-  const existing = reviewIndex.get(key) ?? {
-    review_type: definition.type,
-    status: definition.default_status,
-    trigger,
-    subject_type: subjectType,
-    raw_values: [],
-    normalized_values: [],
-    allow_ai_suggestion: definition.allow_ai_suggestion,
-    allow_auto_approve: definition.allow_auto_approve,
-    required_reviewer_role: definition.required_reviewer_role,
-  };
-
-  for (const rawValue of rawValues) {
-    addUnique(existing.raw_values, rawValue);
-  }
-  for (const normalizedValue of normalizedValues) {
-    addUnique(existing.normalized_values, normalizedValue);
-  }
-  reviewIndex.set(key, existing);
-  return existing;
-}
-
-function indexReviewRules(reviewRulesConfig) {
-  return new Map(
-    reviewRulesConfig.review_types
-      .filter((rule) => rule.enabled)
-      .map((rule) => [rule.auto_create_when, rule]),
-  );
-}
-
 function indexApprovedEntities(items, idField) {
   return new Map(
     items
@@ -471,22 +394,6 @@ function buildTagComparator(sortBy) {
     }
     return compareStrings(left.tag_id, right.tag_id);
   };
-}
-
-function compareCategories(left, right) {
-  return (
-    right.priority - left.priority ||
-    compareStrings(left.display_name, right.display_name) ||
-    compareStrings(left.category_id, right.category_id)
-  );
-}
-
-function compareCategoryMatches(left, right) {
-  return (
-    right.target.priority - left.target.priority ||
-    compareStrings(left.target.display_name, right.target.display_name) ||
-    compareStrings(left.target.category_id, right.target.category_id)
-  );
 }
 
 function createDecision({

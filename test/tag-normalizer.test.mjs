@@ -14,13 +14,11 @@ const configs = await loadJsonDirectory(CONFIG_DIR);
 const baseOptions = {
   aliasConfig: requireConfig("alias"),
   categoryConfig: requireConfig("category"),
-  ignoredConfig: requireConfig("ignored"),
-  reviewRulesConfig: requireConfig("review_rules"),
   tagDictionaryConfig: requireConfig("tag_dictionary"),
   versionConfig: requireConfig("version"),
 };
 
-test("normalizes dictionary aliases, global aliases, ignored values, and reviews", () => {
+test("normalizes dictionary aliases, global aliases, and freeform topics", () => {
   const result = createTagNormalizer(baseOptions).normalize([
     "日本成人",
     "中文",
@@ -97,27 +95,6 @@ test("creates a category review when no category is resolved", () => {
     result.standard_tags.map((tag) => tag.display_name),
     ["NTR", "人妻"],
   );
-});
-
-test("does not recreate category reviews for an explicitly rejected value", () => {
-  const options = structuredClone(baseOptions);
-  options.ignoredConfig.items.push({
-    ignore_id: "ignore_999999",
-    value: "日本电影",
-    normalized_value: "日本电影",
-    scope: ["category", "tag"],
-    match_mode: "exact",
-    reason: "manual rejection",
-    status: "approved",
-    created_at: "2026-07-21T00:00:00Z",
-  });
-
-  const result = createTagNormalizer(options).normalize(["日本电影"]);
-
-  assert.equal(result.selected_category, null);
-  assert.equal(result.reviews.length, 0);
-  assert.equal(result.decisions[0].outcome, "standard_tag");
-  assert.equal(result.standard_tags[0].display_name, "日本电影");
 });
 
 test("does not activate pending dictionary entries", () => {

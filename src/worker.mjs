@@ -34,8 +34,6 @@ const actorNormalizer = createActorNormalizer({
 const tagNormalizer = createTagNormalizer({
   aliasConfig,
   categoryConfig,
-  ignoredConfig,
-  reviewRulesConfig,
   tagDictionaryConfig,
   versionConfig,
 });
