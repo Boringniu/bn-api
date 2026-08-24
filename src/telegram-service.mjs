@@ -1,10 +1,6 @@
 import { normalizeValue } from "./value-normalizer.mjs";
 
 const TELEGRAM_API = "https://api.telegram.org";
-// Telegram hard limit is 4096 chars per message; leave headroom.
-const PAGE_CHAR_LIMIT = 3800;
-const TAGS_PER_LINE = 5;
-const INDEX_ITEMS_PER_BLOCK = 24;
 const BOT_DESCRIPTION_LIMIT = 240;
 const STORY_BATCH_CODE_LIMIT = 20;
 const STORY_LIST_COMMANDS = new Set(["/系列剧情", "系列剧情", "/stories"]);
@@ -510,7 +506,7 @@ export function createTelegramService({
       const storySession = storyService
         ? await storyService.getSession(db, userId)
         : null;
-      const needsAdminCheck = ["/stats", "/duplicates", "/refresh"].includes(command)
+      const needsAdminCheck = ["/stats", "/duplicates"].includes(command)
         || isReviewListCommand
         || isStoryCreateCommand
         || Boolean(storySession);
@@ -547,8 +543,7 @@ export function createTelegramService({
           "/stats - 查看收录统计\n" +
           "/index - 浏览频道索引\n" +
           "/duplicates - 查看重复候选（管理员）\n" +
-          "/reviews - 查看待审核明细（管理员）\n" +
-          "/refresh - 刷新频道索引（管理员）";
+          "/reviews - 查看待审核明细（管理员）";
         replyMarkup = STORY_BROWSE_KEYBOARD;
       } else if (isStoryListCommand) {
         if (!storyService) {
@@ -588,18 +583,6 @@ export function createTelegramService({
             currentChannelId: env.TELEGRAM_CHANNEL_ID,
           });
           replyMarkup = buildDuplicateCandidateMarkup(candidates);
-        }
-      } else if (text === "/refresh") {
-        if (!isUserAdmin) {
-          reply = "权限不足";
-        } else {
-          try {
-            await this.refreshPinnedIndex(db, env);
-            reply = "✅ 置顶索引已刷新";
-          } catch (err) {
-            console.error("refresh failed", err);
-            reply = "❌ 刷新失败：" + err.message;
-          }
         }
       } else if (storySession?.mode === "awaiting_title") {
         if (!isUserAdmin || !storyService) {
@@ -728,7 +711,7 @@ export function createTelegramService({
 
     // 私人频道只由管理员维护：原生发布直接入库；经授权的转发则复制为
     // 无来源副本并删除原转发，再对副本建立索引。
-    async handleChannelPost(db, post, env, { skipIndexRefresh = false } = {}) {
+    async handleChannelPost(db, post, env) {
       const channelId = String(env.TELEGRAM_CHANNEL_ID ?? "");
       if (String(post.chat?.id ?? "") !== channelId) {
         return null;
@@ -881,17 +864,6 @@ export function createTelegramService({
         )
         .run();
 
-      if (result.status === "approved" && !skipIndexRefresh) {
-        // 审核通过后只刷新置顶索引；刷新失败不能影响本次入库。
-        try {
-          await this.refreshPinnedIndex(db, env);
-        } catch (error) {
-          console.warn("pinned index refresh failed", {
-            message: error.message,
-          });
-        }
-      }
-
       const outcome = { ingested: result.id, status: result.status };
       if (stripped) {
         outcome.source_stripped = true;
@@ -931,22 +903,8 @@ export function createTelegramService({
           // 让同组后续视频也能继承人工填写的番号与原生话题。
           await storePendingChannelContext(db, copiedPost, channelId);
           outcomes.push(
-            await this.handleChannelPost(
-              db,
-              copiedPost,
-              env,
-              { skipIndexRefresh: true },
-            ),
+            await this.handleChannelPost(db, copiedPost, env),
           );
-        }
-        if (outcomes.some((outcome) => outcome?.status === "approved")) {
-          try {
-            await this.refreshPinnedIndex(db, env);
-          } catch (error) {
-            console.warn("pinned index refresh failed after media group copy", {
-              message: error.message,
-            });
-          }
         }
         return {
           source_stripped: true,
@@ -1075,16 +1033,6 @@ export function createTelegramService({
         searchService,
       });
       const result = await ingestService.ingest(db, payload);
-
-      if (result.status === "approved") {
-        try {
-          await this.refreshPinnedIndex(db, env);
-        } catch (error) {
-          console.warn("pinned index refresh failed after channel edit", {
-            message: error.message,
-          });
-        }
-      }
       return {
         synchronized: post.message_id,
         ingested: result.id,
@@ -1117,7 +1065,6 @@ export function createTelegramService({
           { command: "newstory", description: "新增一级剧情（管理员）" },
           { command: "duplicates", description: "查看重复候选（管理员）" },
           { command: "reviews", description: "查看待审核明细（管理员）" },
-          { command: "refresh", description: "刷新频道索引（管理员）" },
           { command: "about", description: "简介说明" },
         ],
       });
@@ -1694,175 +1641,6 @@ export function createTelegramService({
           .bind(completedAt, completedAt, auditToken),
       ]);
       return { outcome: "completed", candidate };
-    },
-
-    async refreshPinnedIndex(db, env) {
-      const channelId = env.TELEGRAM_CHANNEL_ID;
-      if (!channelId) {
-        throw new Error("TELEGRAM_CHANNEL_ID is not configured");
-      }
-
-      const [actorRows, tagRows] = await db.batch([
-        db.prepare(`
-          SELECT DISTINCT a.display_name_snapshot AS display_name
-          FROM media_actors a
-          JOIN channel_posts c ON c.media_id = a.media_id
-          JOIN media m ON m.id = a.media_id
-          WHERE m.status = 'approved' AND a.display_enabled = 1
-          ORDER BY a.display_name_snapshot
-        `),
-        db.prepare(`
-          SELECT t.display_name_snapshot AS display_name, MAX(t.weight) AS weight
-          FROM media_tags t
-          JOIN channel_posts c ON c.media_id = t.media_id
-          JOIN media m ON m.id = t.media_id
-          WHERE m.status = 'approved'
-            AND t.display_enabled = 1
-            AND t.tag_id NOT LIKE 'tag_topic_%'
-          GROUP BY t.display_name_snapshot
-          ORDER BY weight DESC, t.display_name_snapshot
-        `),
-      ]);
-      const pages = this.renderIndexPages({
-        actors: actorRows.results ?? [],
-        tags: tagRows.results ?? [],
-      });
-
-      const stored = await readIndexMessageIds(db);
-      const messageIds = [];
-      let pinnedNew = false;
-
-      for (const [pageIndex, text] of pages.entries()) {
-        const existingId = stored[pageIndex];
-        if (existingId) {
-          try {
-            await this.callTelegram(env, "editMessageText", {
-              chat_id: channelId,
-              message_id: existingId,
-              text,
-            });
-            messageIds.push(existingId);
-            continue;
-          } catch (error) {
-            if (String(error.message).includes("message is not modified")) {
-              messageIds.push(existingId);
-              continue;
-            }
-            if (!/message to edit not found|MESSAGE_ID_INVALID/iu.test(error.message)) {
-              throw error;
-            }
-            // Deleted by hand: fall through and send a replacement page.
-          }
-        }
-        const sent = await this.callTelegram(env, "sendMessage", {
-          chat_id: channelId,
-          text,
-        });
-        messageIds.push(sent.message_id);
-        if (pageIndex === 0) {
-          await this.callTelegram(env, "pinChatMessage", {
-            chat_id: channelId,
-            message_id: sent.message_id,
-            disable_notification: true,
-          });
-          pinnedNew = true;
-        }
-      }
-
-      for (const surplusId of stored.slice(pages.length)) {
-        try {
-          await this.callTelegram(env, "deleteMessage", {
-            chat_id: channelId,
-            message_id: surplusId,
-          });
-        } catch {
-          // Already gone is fine.
-        }
-      }
-
-      await db
-        .prepare(
-          `INSERT INTO database_metadata (key, value, updated_at)
-           VALUES (?, ?, ?)
-           ON CONFLICT (key) DO UPDATE SET
-             value = excluded.value, updated_at = excluded.updated_at`,
-        )
-        .bind(
-          "channel_index_message_ids",
-          JSON.stringify(messageIds),
-          new Date().toISOString(),
-        )
-        .run();
-
-      return {
-        outcome: pinnedNew ? "pinned" : "edited",
-        pages: pages.length,
-        message_ids: messageIds,
-      };
-    },
-
-    renderIndexPages({ actors = [], tags = [] } = {}) {
-      const actorNames = actors
-        .map((row) => row.display_name)
-        .filter(Boolean);
-      const actorValues = new Set(actorNames.map(normalizeValue));
-      const actorTags = uniqueHashtags(
-        actorNames.map((name) => hashtag(name, channelIndex.actor_prefix)),
-      );
-      const typeTags = uniqueHashtags(
-        tags
-          .map((row) => row.display_name)
-          .filter((name) => isIndexTopic(name, actorValues, searchService))
-          .map((name) => hashtag(name, channelIndex.tag_prefix)),
-      );
-      const blocks = [
-        ...(channelIndex.show_actors
-          ? buildIndexBlocks(channelIndex.actors_label, actorTags)
-          : []),
-        ...(channelIndex.show_tags
-          ? buildIndexBlocks(channelIndex.tags_label, typeTags)
-          : []),
-      ];
-      if (blocks.length === 0) {
-        return [channelIndex.title];
-      }
-
-      const pages = [];
-      let current = channelIndex.title;
-      const pushPage = () => {
-        pages.push(current.trim());
-        current = `${channelIndex.title}（续）`;
-      };
-      for (const block of blocks) {
-        const blockHeader = `\n\n${block.label}`;
-        if (current.length + blockHeader.length > PAGE_CHAR_LIMIT) {
-          pushPage();
-        }
-        current += blockHeader;
-        for (const line of block.lines) {
-          if (current.length + line.length + 1 > PAGE_CHAR_LIMIT) {
-            pushPage();
-            current += `\n\n${block.label}（续）`;
-          }
-          current += `\n${line}`;
-        }
-      }
-      pushPage();
-
-      const summary = [
-        actorTags.length > 0 ? `演员 ${actorTags.length} 位` : null,
-        typeTags.length > 0 ? `话题 ${typeTags.length} 项` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      return pages.map((page, index) => {
-        const oldHeader = index === 0 ? channelIndex.title : `${channelIndex.title}（续）`;
-        const pageTitle = pages.length > 1
-          ? `${channelIndex.title} · ${index + 1}/${pages.length}`
-          : channelIndex.title;
-        const header = index === 0 && summary ? `${pageTitle}\n${summary}` : pageTitle;
-        return `${header}${page.slice(oldHeader.length)}`;
-      });
     },
 
     async callTelegram(env, method, payload) {
@@ -3002,58 +2780,6 @@ function resolveKnownActorTags(rawTags, searchService) {
     const { resolution } = searchService.resolveQuery(tag);
     return resolution?.type === "actor" ? [resolution.display_name] : [];
   });
-}
-
-function chunkTags(tags) {
-  const lines = [];
-  for (let i = 0; i < tags.length; i += TAGS_PER_LINE) {
-    lines.push(tags.slice(i, i + TAGS_PER_LINE).join(" "));
-  }
-  return lines;
-}
-
-function uniqueHashtags(values) {
-  const seen = new Set();
-  return values.filter((value) => {
-    if (!value) {
-      return false;
-    }
-    const normalized = normalizeValue(value.replace(/^#/u, ""));
-    if (!normalized || seen.has(normalized)) {
-      return false;
-    }
-    seen.add(normalized);
-    return true;
-  });
-}
-
-function isIndexTopic(value, actorValues, searchService) {
-  if (typeof value !== "string" || !value.trim()) {
-    return false;
-  }
-  const normalized = normalizeValue(value);
-  if (!normalized || actorValues.has(normalized)) {
-    return false;
-  }
-  const { resolution } = searchService.resolveQuery(value);
-  return !["actor", "category"].includes(resolution?.type);
-}
-
-function buildIndexBlocks(label, tags) {
-  if (tags.length === 0) {
-    return [];
-  }
-  const totalBlocks = Math.ceil(tags.length / INDEX_ITEMS_PER_BLOCK);
-  const blocks = [];
-  for (let offset = 0; offset < tags.length; offset += INDEX_ITEMS_PER_BLOCK) {
-    const blockIndex = Math.floor(offset / INDEX_ITEMS_PER_BLOCK);
-    const suffix = totalBlocks > 1 ? `（${blockIndex + 1}/${totalBlocks}）` : "";
-    blocks.push({
-      label: `${label} · ${tags.length}${suffix}`,
-      lines: chunkTags(tags.slice(offset, offset + INDEX_ITEMS_PER_BLOCK)),
-    });
-  }
-  return blocks;
 }
 
 function resolveTelegramMedia(post) {

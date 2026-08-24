@@ -89,7 +89,7 @@ jobs:
             --header "Content-Type: application/json" \
             --data "$payload" | jq '.data | {source_stripped, copied_message_ids, catalog}'
 
-      - name: Reindex catalog and refresh pinned index
+      - name: Reindex catalog
         env:
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
           WORKER_URL: https://bn-api.nnmmc326.workers.dev
@@ -98,7 +98,7 @@ jobs:
             response=$(curl --fail-with-body --silent --show-error \
               --request POST "$WORKER_URL/v1/catalog/reindex" \
               --header "Authorization: Bearer $INGEST_TOKEN")
-            echo "$response" | jq '{processed: .data.processed, remaining: .data.remaining, ruleset_version: .data.ruleset_version, index: .data.index}'
+            echo "$response" | jq '{processed: .data.processed, remaining: .data.remaining, ruleset_version: .data.ruleset_version}'
             remaining=$(echo "$response" | jq -r '.data.remaining')
             if [ "$remaining" = "0" ]; then
               exit 0

@@ -151,13 +151,6 @@ export function createWorkerApp({
           return jsonResponse({ data: result }, 200, requestId);
         }
 
-        if (request.method === "POST" && url.pathname === "/v1/channel/index") {
-          assertAuthorized(request, env);
-          assertDb(env);
-          const result = await telegramService.refreshPinnedIndex(env.DB, env);
-          return jsonResponse({ data: result }, 200, requestId);
-        }
-
         if (
           request.method === "POST" &&
           url.pathname === "/v1/channel/repair-forward-group"
@@ -225,7 +218,6 @@ export function createWorkerApp({
               tg_message_id: copiedMessageIds[payload.catalog.video_index],
             };
           }
-          await telegramService.refreshPinnedIndex(env.DB, env);
           return jsonResponse(
             { data: { source_stripped: true, copied_message_ids: copiedMessageIds, catalog } },
             200,
@@ -461,21 +453,10 @@ async function reindexCatalog({
     .bind(versionConfig.release.version)
     .first();
   const remaining = Number(remainingRow?.total ?? 0);
-  const canRefreshTelegramIndex = Boolean(
-    env.TELEGRAM_CHANNEL_ID && env.TELEGRAM_BOT_TOKEN,
-  );
-  const index =
-    remaining === 0 && canRefreshTelegramIndex
-      ? await telegramService.refreshPinnedIndex(db, env)
-      : remaining === 0
-        ? { outcome: "skipped", reason: "telegram_not_configured" }
-        : null;
-
   return {
     processed: rows.length,
     remaining,
     ruleset_version: versionConfig.release.version,
-    index,
   };
 }
 

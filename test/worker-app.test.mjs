@@ -480,14 +480,9 @@ test("repairs an authorized forwarded media group and restores its catalog mappi
   const ingestService = createIngestStub({ id: "media_repaired", status: "approved" });
   const telegramService = {
     stripCalls: [],
-    refreshCalls: 0,
     async stripForwardMediaGroup(posts, channelId) {
       this.stripCalls.push({ posts, channelId });
       return [40, 41, 42];
-    },
-    async refreshPinnedIndex() {
-      this.refreshCalls += 1;
-      return { outcome: "edited", pages: 1, message_ids: [34] };
     },
   };
   const app = createWorkerApp({
@@ -532,7 +527,6 @@ test("repairs an authorized forwarded media group and restores its catalog mappi
   assert.equal(ingestService.calls.length, 1);
   assert.equal(ingestService.calls[0].payload.source.external_id, "-1004396154285:42");
   assert.equal(ingestService.calls[0].payload.code, "ADN-115");
-  assert.equal(telegramService.refreshCalls, 1);
   assert.deepEqual((await response.json()).data.copied_message_ids, [40, 41, 42]);
 });
 
@@ -588,14 +582,8 @@ test("removed channel distribution routes return 404", async () => {
   }
 });
 
-test("reindex skips Telegram index refresh when Telegram is not configured", async () => {
-  const telegramService = {
-    refreshCalls: 0,
-    async refreshPinnedIndex() {
-      this.refreshCalls += 1;
-      return { outcome: "edited", pages: 1, message_ids: [10] };
-    },
-  };
+test("reindex preserves hand-written Telegram index content", async () => {
+  const telegramService = {};
   const app = createWorkerApp({
     ingestService: createIngestStub(),
     reviewService: createReviewStub(),
@@ -616,22 +604,12 @@ test("reindex skips Telegram index refresh when Telegram is not configured", asy
   const body = await response.json();
   assert.equal(body.data.processed, 0);
   assert.equal(body.data.remaining, 0);
-  assert.deepEqual(body.data.index, {
-    outcome: "skipped",
-    reason: "telegram_not_configured",
-  });
-  assert.equal(telegramService.refreshCalls, 0);
+  assert.equal(body.data.index, undefined);
 });
 
-test("reindexes stored payloads and refreshes the index when complete", async () => {
+test("reindexes stored payloads without editing the hand-written index", async () => {
   const ingestService = createIngestStub({ status: "approved" });
-  const telegramService = {
-    refreshCalls: 0,
-    async refreshPinnedIndex() {
-      this.refreshCalls += 1;
-      return { outcome: "edited", pages: 1, message_ids: [10] };
-    },
-  };
+  const telegramService = {};
   const app = createWorkerApp({
     ingestService,
     reviewService: createReviewStub(),
@@ -668,7 +646,7 @@ test("reindexes stored payloads and refreshes the index when complete", async ()
   assert.equal(body.data.processed, 1);
   assert.equal(body.data.remaining, 0);
   assert.equal(ingestService.calls.length, 1);
-  assert.equal(telegramService.refreshCalls, 1);
+  assert.equal(body.data.index, undefined);
 });
 
 function createReviewStub() {

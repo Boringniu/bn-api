@@ -1001,57 +1001,6 @@ test("duplicate deletion buttons require an explicit second confirmation", async
   assert.match(calls.at(-1).body.text, /已删除 #ADN-100/);
 });
 
-test("refresh command rejects non-admins and permits configured admins", async () => {
-  const calls = [];
-  const service = createService({
-    fetchImpl: async (url, init) => {
-      calls.push({ method: url.split("/").at(-1), body: JSON.parse(init.body) });
-      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
-    },
-  });
-  const env = {
-    TELEGRAM_BOT_TOKEN: "bot-token",
-    TELEGRAM_ADMIN_IDS: "1001, 2002",
-    TELEGRAM_CHANNEL_ID: "-1004396154285",
-  };
-
-  await service.handleUpdate(
-    new FakeD1(),
-    {
-      message: {
-        chat: { id: 111, type: "private" },
-        from: { id: 3003 },
-        text: "/refresh",
-      },
-    },
-    env,
-  );
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].method, "getChatMember");
-  assert.equal(calls.at(-1).body.text, "权限不足");
-
-  const adminDb = new FakeD1({
-    batchResults: [
-      [{ display_name: "松下纱荣子" }],
-      [{ display_name: "人妻", weight: 1 }],
-    ],
-    firstResults: [null, null],
-  });
-  await service.handleUpdate(
-    adminDb,
-    {
-      message: {
-        chat: { id: 111, type: "private" },
-        from: { id: 2002 },
-        text: "/refresh",
-      },
-    },
-    env,
-  );
-  assert.ok(calls.some((call) => call.method === "pinChatMessage"));
-  assert.equal(calls.at(-1).body.text, "✅ 置顶索引已刷新");
-});
-
 test("channel administrators receive bot admin permissions while regular members do not", async () => {
   const calls = [];
   const service = createService({
@@ -2205,7 +2154,6 @@ test("configures webhook to receive channel posts and channel edits", async () =
       { command: "newstory", description: "新增一级剧情（管理员）" },
       { command: "duplicates", description: "查看重复候选（管理员）" },
       { command: "reviews", description: "查看待审核明细（管理员）" },
-      { command: "refresh", description: "刷新频道索引（管理员）" },
       { command: "about", description: "简介说明" },
     ],
   });
@@ -2233,184 +2181,7 @@ test("configures webhook to receive channel posts and channel edits", async () =
   });
 });
 
-test("refreshPinnedIndex posts once, pins, then edits in place", async () => {
-  const telegramCalls = [];
-  const fetchImpl = async (url, init) => {
-    telegramCalls.push({ url, body: JSON.parse(init.body) });
-    return { json: async () => ({ ok: true, result: { message_id: 55 } }) };
-  };
-  const service = createService({ fetchImpl });
-  const env = { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-100" };
-
-  const freshDb = new FakeD1({
-    firstResults: [null],
-    batchResults: [
-      [{ display_name: "希岛爱理" }, { display_name: "希岛爱理" }],
-      [
-        { display_name: "剧情", weight: 80 },
-        { display_name: "中文字幕", weight: 70 },
-        { display_name: "剧情", weight: 80 },
-      ],
-    ],
-  });
-  const pinned = await service.refreshPinnedIndex(freshDb, env);
-  assert.equal(pinned.outcome, "pinned");
-  assert.equal(pinned.pages, 1);
-  assert.deepEqual(pinned.message_ids, [55]);
-  assert.ok(telegramCalls.some((c) => c.url.includes("/pinChatMessage")));
-  const sendCall = telegramCalls.find((c) => c.url.includes("/sendMessage"));
-  assert.equal(
-    sendCall.body.text,
-    "影视库索引\n演员 1 位 · 话题 2 项\n\n👤演员 · 1\n#希岛爱理\n\n🏷话题 · 2\n#剧情 #中文字幕",
-  );
-  assert.ok(
-    freshDb.statements.some(
-      (s) => s.sql.includes("FROM media_tags") && s.sql.includes("tag_id NOT LIKE 'tag_topic_%'"),
-    ),
-    "index tags must exclude free raw topics and use standardized media_tags",
-  );
-  assert.ok(
-    freshDb.statements.some((s) => s.sql.includes("INSERT INTO database_metadata")),
-  );
-
-  telegramCalls.length = 0;
-  const editDb = new FakeD1({
-    firstResults: [{ value: "[55]" }],
-    batchResults: [
-      [{ display_name: "希岛爱理" }, { display_name: "希岛爱理" }],
-      [
-        { display_name: "剧情", weight: 80 },
-        { display_name: "中文字幕", weight: 70 },
-        { display_name: "剧情", weight: 80 },
-      ],
-    ],
-  });
-  const edited = await service.refreshPinnedIndex(editDb, env);
-  assert.equal(edited.outcome, "edited");
-  assert.ok(telegramCalls[0].url.includes("/editMessageText"));
-  assert.equal(telegramCalls[0].body.message_id, 55);
-});
-
-test("channel index deduplicates tags and groups long sections", () => {
-  const service = createService();
-  const tags = Array.from({ length: 25 }, (_, index) => ({
-    display_name: `话题${index + 1}`,
-  }));
-  const pages = service.renderIndexPages({
-    actors: [{ display_name: "希岛爱理" }, { display_name: "希岛爱理" }],
-    tags: [...tags, { display_name: "话题1" }],
-  });
-
-  assert.equal(pages.length, 1);
-  assert.match(pages[0], /演员 1 位 · 话题 25 项/);
-  assert.match(pages[0], /👤演员 · 1/);
-  assert.match(pages[0], /🏷话题 · 25（1\/2）/);
-  assert.match(pages[0], /🏷话题 · 25（2\/2）/);
-  assert.equal((pages[0].match(/#话题1(?:\s|$)/gu) ?? []).length, 1);
-});
-
-test("channel index excludes actor aliases, categories, and duplicate standard tags", () => {
-  const service = createService({
-    searchService: createSearchStub({
-      resolutions: {
-        "七海ティナ": { type: "actor", display_name: "七海蒂娜" },
-        "日本": { type: "category", display_name: "日本" },
-      },
-    }),
-  });
-  const [page] = service.renderIndexPages({
-    actors: [{ display_name: "七海蒂娜" }],
-    tags: [
-      { display_name: "七海蒂娜" },
-      { display_name: "七海ティナ" },
-      { display_name: "日本" },
-      { display_name: "剧情" },
-      { display_name: "剧情" },
-    ],
-  });
-
-  assert.match(page, /👤演员 · 1\n#七海蒂娜/);
-  assert.match(page, /🏷话题 · 1\n#剧情/);
-  assert.ok(!page.includes("#七海ティナ"));
-  assert.ok(!page.includes("#日本"));
-});
-
-test("empty channel index falls back to a single title message", async () => {
-  const telegramCalls = [];
-  const service = createService({
-    fetchImpl: async (url, init) => {
-      telegramCalls.push({ url, body: JSON.parse(init.body) });
-      return { json: async () => ({ ok: true, result: { message_id: 101 } }) };
-    },
-  });
-  const db = new FakeD1({ firstResults: [null], batchResults: [[], []] });
-
-  const result = await service.refreshPinnedIndex(db, {
-    TELEGRAM_BOT_TOKEN: "bot-token",
-    TELEGRAM_CHANNEL_ID: "-100",
-  });
-
-  assert.equal(result.pages, 1);
-  assert.deepEqual(result.message_ids, [101]);
-  const sends = telegramCalls.filter((call) => call.url.includes("/sendMessage"));
-  assert.equal(sends.length, 1);
-  assert.equal(sends[0].body.text, "影视库索引");
-  const pins = telegramCalls.filter((call) => call.url.includes("/pinChatMessage"));
-  assert.equal(pins.length, 1);
-});
-
-test("approved channel video refreshes the index automatically", async () => {
-  const telegramCalls = [];
-  const service = createTelegramService({
-    categoryConfig: configs.get("category").data,
-    displayConfig,
-    ingestService: {
-      async ingest() {
-        return {
-          id: "media_new",
-          status: "approved",
-          category: { category_id: "cat_japan", display_name: "日本" },
-          actors: [],
-          tags: [],
-        };
-      },
-    },
-    searchConfig: configs.get("search").data,
-    searchService: createSearchStub(),
-    versionConfig,
-    fetchImpl: async (url, init) => {
-      telegramCalls.push({ url, body: JSON.parse(init.body) });
-      return { json: async () => ({ ok: true, result: { message_id: 5 } }) };
-    },
-  });
-  const db = new FakeD1({
-    batchResults: [[], [], []],
-    firstResults: [null, null],
-  });
-
-  await service.handleUpdate(
-    db,
-    {
-      channel_post: {
-        chat: { id: -100 },
-        message_id: 9,
-        forward_origin: {
-          type: "user",
-          sender_user: { id: 8101858846, is_bot: true },
-        },
-        video: { file_id: "F", file_name: "ABP-123.mp4" },
-      },
-    },
-    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_CHANNEL_ID: "-100" },
-  );
-
-  assert.ok(
-    telegramCalls.some((c) => c.url.includes("/pinChatMessage")),
-    "index refresh should run after approved ingest",
-  );
-});
-
-test("private channel forwarded video is catalogued without reposting or deleting it", async () => {
+test("approved channel video is catalogued without modifying the hand-written index", async () => {
   const ingestCalls = [];
   const telegramCalls = [];
   const service = createTelegramService({
@@ -2485,13 +2256,9 @@ test("private channel forwarded video is catalogued without reposting or deletin
   );
   assert.ok(
     !telegramCalls.some((call) =>
-      /\/(copyMessage|deleteMessage|editMessageCaption)$/u.test(call.url),
+      /\/(copyMessage|deleteMessage|editMessageCaption|sendMessage|editMessageText|pinChatMessage)$/u.test(call.url),
     ),
-    "private-channel media must retain its original post and caption",
-  );
-  assert.ok(
-    telegramCalls.some((call) => call.url.includes("/sendMessage")),
-    "approved ingest should still maintain the pinned index",
+    "approved ingest must retain the original post and never modify the hand-written index",
   );
 });
 
