@@ -454,10 +454,10 @@ test("about command explains the direct query workflow", async () => {
   assert.ok(calls[0].body.text.includes("/stats - 查看收录统计"));
   assert.ok(calls[0].body.text.includes("/reviews - 查看待审核明细（管理员）"));
   assert.deepEqual(calls[0].body.reply_markup, {
-    keyboard: [[{ text: "系列剧情" }]],
+    keyboard: [[{ text: "系列剧情" }, { text: "新增剧情" }]],
     resize_keyboard: true,
     is_persistent: true,
-    input_field_placeholder: "输入番号、演员、话题，或点击系列剧情",
+    input_field_placeholder: "输入番号、演员、话题，或点击剧情按键",
   });
 });
 

@@ -10,10 +10,10 @@ const STORY_BATCH_CODE_LIMIT = 20;
 const STORY_LIST_COMMANDS = new Set(["/系列剧情", "系列剧情", "/stories"]);
 const STORY_CREATE_COMMANDS = new Set(["/新增剧情", "新增剧情", "/newstory"]);
 const STORY_BROWSE_KEYBOARD = Object.freeze({
-  keyboard: [[{ text: "系列剧情" }]],
+  keyboard: [[{ text: "系列剧情" }, { text: "新增剧情" }]],
   resize_keyboard: true,
   is_persistent: true,
-  input_field_placeholder: "输入番号、演员、话题，或点击系列剧情",
+  input_field_placeholder: "输入番号、演员、话题，或点击剧情按键",
 });
 const PENDING_CHANNEL_CONTEXT_PREFIX = "channel_pending_caption_context:";
 const PENDING_CHANNEL_CONTEXT_MESSAGE_WINDOW = 6;
