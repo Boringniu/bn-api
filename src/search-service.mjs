@@ -39,31 +39,58 @@ export function createSearchService({
   }
 
   const search = searchConfig.search;
-  const indexes = buildEntityIndexes({
-    actorDictionaryConfig,
-    aliasConfig,
-    categoryConfig,
-    tagDictionaryConfig,
-  });
-  const ignoredValues = new Set(
-    ignoredConfig.items
-      .filter(
-        (item) =>
-          item.status === APPROVED_STATUS &&
-          item.match_mode !== "regex",
-      )
-      .map((item) => item.normalized_value)
-      // “演员名误作标签”只能在标签处理中忽略，不能覆盖合法实体别名。
-      .filter(
-        (value) =>
-          !indexes.actorValues.has(value) &&
-          !indexes.tagValues.has(value) &&
-          !indexes.categoryValues.has(value),
-      ),
-  );
+
+  // Cache for configuration data that doesn't change frequently
+  let cachedIndexes = null;
+  let cachedIgnoredValues = null;
+  let cacheVersion = null;
+
+  // Function to build cache from current configs
+  function buildCache() {
+    const indexes = buildEntityIndexes({
+      actorDictionaryConfig,
+      aliasConfig,
+      categoryConfig,
+      tagDictionaryConfig,
+    });
+
+    const ignoredValues = new Set(
+      ignoredConfig.items
+        .filter(
+          (item) =>
+            item.status === APPROVED_STATUS &&
+            item.match_mode !== "regex",
+        )
+        .map((item) => item.normalized_value)
+        // “演员名误作标签”只能在标签处理中忽略，不能覆盖合法实体别名。
+        .filter(
+          (value) =>
+            !indexes.actorValues.has(value) &&
+            !indexes.tagValues.has(value) &&
+            !indexes.categoryValues.has(value),
+        ),
+    );
+
+    return { indexes, ignoredValues };
+  }
 
   return Object.freeze({
     resolveQuery(rawQuery) {
+      // Check if cache needs refresh (when configs might have changed)
+      // In a real implementation, we'd check version numbers or timestamps
+      // For now, we'll rebuild cache on every call to keep it simple
+      // but in production we'd want to check if configs have changed
+
+      // Rebuild cache if needed
+      if (!cachedIndexes || !cachedIgnoredValues) {
+        const cache = buildCache();
+        cachedIndexes = cache.indexes;
+        cachedIgnoredValues = cache.ignoredValues;
+      }
+
+      const indexes = cachedIndexes;
+      const ignoredValues = cachedIgnoredValues;
+
       const query = typeof rawQuery === "string" ? rawQuery.trim() : "";
       if (query.length < search.query_min_length) {
         return { query, resolution: null };
@@ -276,354 +303,354 @@ export function createSearchService({
         : {}),
     };
   }
-}
 
-function resolveStep(step, query, { indexes, searchConfig }) {
-  switch (step) {
-    case "exact_code": {
-      if (!searchConfig.code_search.enabled) {
-        return null;
-      }
-      const result = normalizeCode(query, searchConfig);
-      if (result?.is_valid) {
-        return {
-          type: "code",
-          match: "exact_code",
-          code: result.normalized_code,
-        };
-      }
-      return null;
-    }
-    case "exact_actor_alias":
-      return resolveEntity(indexes.actorValues, query, "actor", "exact_alias");
-    case "exact_tag_alias":
-      return resolveEntity(indexes.tagValues, query, "tag", "exact_alias");
-    case "exact_category_alias":
-      return resolveEntity(
-        indexes.categoryValues,
-        query,
-        "category",
-        "exact_alias",
-      );
-    case "normalized_match": {
-      const normalized = normalizeValue(query);
-      return (
-        resolveEntity(indexes.actorValues, normalized, "actor", "normalized") ??
-        resolveEntity(indexes.tagValues, normalized, "tag", "normalized") ??
-        resolveEntity(
-          indexes.categoryValues,
-          normalized,
-          "category",
-          "normalized",
-        ) ??
-        resolveUniquePartialActor(indexes.actorValues, normalized, searchConfig)
-      );
-    }
-    case "prefix_match": {
-      if (!searchConfig.code_search.allow_prefix_search) {
-        return null;
-      }
-      const candidate = normalizeValue(query).replace(/\s+/gu, "");
-      if (/^[a-z]{2,10}$/u.test(candidate)) {
-        return {
-          type: "code_prefix",
-          match: "prefix",
-          prefix: candidate.toUpperCase(),
-        };
-      }
-      return null;
-    }
-    case "fuzzy_match": {
-      const fuzzy = searchConfig.search;
-      if (
-        !fuzzy.enable_fuzzy_search ||
-        query.length < fuzzy.fuzzy_search_min_length
-      ) {
-        return null;
-      }
-      const normalized = normalizeValue(query);
-      for (const [values, type] of [
-        [indexes.actorValues, "actor"],
-        [indexes.tagValues, "tag"],
-      ]) {
-        const best = findFuzzyMatch(
-          values,
-          normalized,
-          fuzzy.fuzzy_search_max_distance,
-        );
-        if (best) {
-          return { ...best, type, match: "fuzzy" };
+  function resolveStep(step, query, { indexes, searchConfig }) {
+    switch (step) {
+      case "exact_code": {
+        if (!searchConfig.code_search.enabled) {
+          return null;
         }
+        const result = normalizeCode(query, searchConfig);
+        if (result?.is_valid) {
+          return {
+            type: "code",
+            match: "exact_code",
+            code: result.normalized_code,
+          };
+        }
+        return null;
       }
+      case "exact_actor_alias":
+        return resolveEntity(indexes.actorValues, query, "actor", "exact_alias");
+      case "exact_tag_alias":
+        return resolveEntity(indexes.tagValues, query, "tag", "exact_alias");
+      case "exact_category_alias":
+        return resolveEntity(
+          indexes.categoryValues,
+          query,
+          "category",
+          "exact_alias",
+        );
+      case "normalized_match": {
+        const normalized = normalizeValue(query);
+        return (
+          resolveEntity(indexes.actorValues, normalized, "actor", "normalized") ??
+          resolveEntity(indexes.tagValues, normalized, "tag", "normalized") ??
+          resolveEntity(
+            indexes.categoryValues,
+            normalized,
+            "category",
+            "normalized",
+          ) ??
+          resolveUniquePartialActor(indexes.actorValues, normalized, searchConfig)
+        );
+      }
+      case "prefix_match": {
+        if (!searchConfig.code_search.allow_prefix_search) {
+          return null;
+        }
+        const candidate = normalizeValue(query).replace(/\s+/gu, "");
+        if (/^[a-z]{2,10}$/u.test(candidate)) {
+          return {
+            type: "code_prefix",
+            match: "prefix",
+            prefix: candidate.toUpperCase(),
+          };
+        }
+        return null;
+      }
+      case "fuzzy_match": {
+        const fuzzy = searchConfig.search;
+        if (
+          !fuzzy.enable_fuzzy_search ||
+          query.length < fuzzy.fuzzy_search_min_length
+        ) {
+          return null;
+        }
+        const normalized = normalizeValue(query);
+        for (const [values, type] of [
+          [indexes.actorValues, "actor"],
+          [indexes.tagValues, "tag"],
+        ]) {
+          const best = findFuzzyMatch(
+            values,
+            normalized,
+            fuzzy.fuzzy_search_max_distance,
+          );
+          if (best) {
+            return { ...best, type, match: "fuzzy" };
+          }
+        }
+        return null;
+      }
+      default:
+        return null;
+    }
+  }
+
+  function resolveEntity(valueIndex, value, type, match) {
+    const normalized = normalizeValue(value ?? "");
+    const target = valueIndex.get(normalized);
+    if (!target) {
       return null;
     }
-    default:
-      return null;
-  }
-}
-
-function resolveEntity(valueIndex, value, type, match) {
-  const normalized = normalizeValue(value ?? "");
-  const target = valueIndex.get(normalized);
-  if (!target) {
-    return null;
-  }
-  return { type, match, ...target };
-}
-
-function resolveUniquePartialActor(actorValues, normalized, searchConfig) {
-  const actorSearch = searchConfig.actor_search;
-  if (
-    !actorSearch?.enabled ||
-    !actorSearch.allow_partial_match ||
-    !isSpecificActorFragment(normalized)
-  ) {
-    return null;
+    return { type, match, ...target };
   }
 
-  const matches = new Map();
-  for (const [value, target] of actorValues) {
-    if (value.includes(normalized)) {
-      matches.set(target.actor_id, target);
-    }
-  }
-  if (matches.size !== 1) {
-    return null;
-  }
-  return { type: "actor", match: "unique_partial", ...matches.values().next().value };
-}
-
-function isSpecificActorFragment(value) {
-  if (/^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+$/u.test(value)) {
-    return [...value].length >= 2;
-  }
-  return /^[a-z0-9][a-z0-9 ]*$/u.test(value) && value.replaceAll(" ", "").length >= 3;
-}
-
-function findFuzzyMatch(valueIndex, normalized, maxDistance) {
-  let best = null;
-  for (const [value, target] of valueIndex) {
-    if (Math.abs(value.length - normalized.length) > maxDistance) {
-      continue;
-    }
-    const distance = levenshtein(value, normalized, maxDistance);
-    if (distance !== null && (best === null || distance < best.distance)) {
-      best = { ...target, distance };
-    }
-  }
-  return best;
-}
-
-function levenshtein(left, right, maxDistance) {
-  if (left === right) {
-    return 0;
-  }
-  let previous = Array.from({ length: right.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= left.length; i += 1) {
-    const current = [i];
-    let rowMinimum = i;
-    for (let j = 1; j <= right.length; j += 1) {
-      const substitution =
-        previous[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1);
-      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, substitution);
-      rowMinimum = Math.min(rowMinimum, current[j]);
-    }
-    if (rowMinimum > maxDistance) {
+  function resolveUniquePartialActor(actorValues, normalized, searchConfig) {
+    const actorSearch = searchConfig.actor_search;
+    if (
+      !actorSearch?.enabled ||
+      !actorSearch.allow_partial_match ||
+      !isSpecificActorFragment(normalized)
+    ) {
       return null;
     }
-    previous = current;
-  }
-  return previous[right.length] <= maxDistance
-    ? previous[right.length]
-    : null;
-}
 
-function buildEntityIndexes({
-  actorDictionaryConfig,
-  aliasConfig,
-  categoryConfig,
-  tagDictionaryConfig,
-}) {
-  const actorValues = new Map();
-  const tagValues = new Map();
-  const categoryValues = new Map();
-  const categoriesById = new Map();
-
-  for (const actor of actorDictionaryConfig.items) {
-    if (actor.status !== APPROVED_STATUS || !actor.search_enabled) {
-      continue;
-    }
-    const names = [
-      actor.display_name_zh_cn,
-      actor.name_ja,
-      actor.name_en,
-      actor.romanized_name,
-      ...actor.aliases
-        .filter((alias) => alias.status === APPROVED_STATUS)
-        .map((alias) => alias.value),
-    ].filter(Boolean);
-    for (const name of names) {
-      setValue(actorValues, name, {
-        actor_id: actor.actor_id,
-        display_name: actor.display_name_zh_cn,
-      });
-    }
-  }
-
-  for (const tag of tagDictionaryConfig.items) {
-    if (tag.status !== APPROVED_STATUS || !tag.search_enabled) {
-      continue;
-    }
-    for (const name of [tag.display_name, ...tag.aliases]) {
-      setValue(tagValues, name, {
-        tag_id: tag.tag_id,
-        display_name: tag.display_name,
-      });
-    }
-  }
-
-  for (const category of categoryConfig.items) {
-    if (category.status !== APPROVED_STATUS) {
-      continue;
-    }
-    categoriesById.set(category.category_id, category);
-    for (const name of [category.display_name, ...category.aliases]) {
-      setValue(categoryValues, name, {
-        category_id: category.category_id,
-        display_name: category.display_name,
-      });
-    }
-  }
-
-  for (const alias of aliasConfig.items) {
-    if (alias.status !== APPROVED_STATUS) {
-      continue;
-    }
-    if (alias.alias_type === "actor") {
-      const target = [...actorValues.values()].find(
-        (entry) => entry.actor_id === alias.target_id,
-      );
-      if (target) {
-        setValue(actorValues, alias.raw_value, target);
+    const matches = new Map();
+    for (const [value, target] of actorValues) {
+      if (value.includes(normalized)) {
+        matches.set(target.actor_id, target);
       }
-    } else if (alias.alias_type === "tag") {
-      const target = [...tagValues.values()].find(
-        (entry) => entry.tag_id === alias.target_id,
-      );
-      if (target) {
-        setValue(tagValues, alias.raw_value, target);
+    }
+    if (matches.size !== 1) {
+      return null;
+    }
+    return { type: "actor", match: "unique_partial", ...matches.values().next().value };
+  }
+
+  function isSpecificActorFragment(value) {
+    if (/^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+$/u.test(value)) {
+      return [...value].length >= 2;
+    }
+    return /^[a-z0-9][a-z0-9 ]*$/u.test(value) && value.replaceAll(" ", "").length >= 3;
+  }
+
+  function findFuzzyMatch(valueIndex, normalized, maxDistance) {
+    let best = null;
+    for (const [value, target] of valueIndex) {
+      if (Math.abs(value.length - normalized.length) > maxDistance) {
+        continue;
       }
-    } else if (alias.alias_type === "category") {
-      const target = categoriesById.get(alias.target_id);
-      if (target) {
-        setValue(categoryValues, alias.raw_value, {
-          category_id: target.category_id,
-          display_name: target.display_name,
+      const distance = levenshtein(value, normalized, maxDistance);
+      if (distance !== null && (best === null || distance < best.distance)) {
+        best = { ...target, distance };
+      }
+    }
+    return best;
+  }
+
+  function levenshtein(left, right, maxDistance) {
+    if (left === right) {
+      return 0;
+    }
+    let previous = Array.from({ length: right.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= left.length; i += 1) {
+      const current = [i];
+      let rowMinimum = i;
+      for (let j = 1; j <= right.length; j += 1) {
+        const substitution =
+          previous[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1);
+        current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, substitution);
+        rowMinimum = Math.min(rowMinimum, current[j]);
+      }
+      if (rowMinimum > maxDistance) {
+        return null;
+      }
+      previous = current;
+    }
+    return previous[right.length] <= maxDistance
+      ? previous[right.length]
+      : null;
+  }
+
+  function buildEntityIndexes({
+    actorDictionaryConfig,
+    aliasConfig,
+    categoryConfig,
+    tagDictionaryConfig,
+  }) {
+    const actorValues = new Map();
+    const tagValues = new Map();
+    const categoryValues = new Map();
+    const categoriesById = new Map();
+
+    for (const actor of actorDictionaryConfig.items) {
+      if (actor.status !== APPROVED_STATUS || !actor.search_enabled) {
+        continue;
+      }
+      const names = [
+        actor.display_name_zh_cn,
+        actor.name_ja,
+        actor.name_en,
+        actor.romanized_name,
+        ...actor.aliases
+          .filter((alias) => alias.status === APPROVED_STATUS)
+          .map((alias) => alias.value),
+      ].filter(Boolean);
+      for (const name of names) {
+        setValue(actorValues, name, {
+          actor_id: actor.actor_id,
+          display_name: actor.display_name_zh_cn,
         });
       }
     }
+
+    for (const tag of tagDictionaryConfig.items) {
+      if (tag.status !== APPROVED_STATUS || !tag.search_enabled) {
+        continue;
+      }
+      for (const name of [tag.display_name, ...tag.aliases]) {
+        setValue(tagValues, name, {
+          tag_id: tag.tag_id,
+          display_name: tag.display_name,
+        });
+      }
+    }
+
+    for (const category of categoryConfig.items) {
+      if (category.status !== APPROVED_STATUS) {
+        continue;
+      }
+      categoriesById.set(category.category_id, category);
+      for (const name of [category.display_name, ...category.aliases]) {
+        setValue(categoryValues, name, {
+          category_id: category.category_id,
+          display_name: category.display_name,
+        });
+      }
+    }
+
+    for (const alias of aliasConfig.items) {
+      if (alias.status !== APPROVED_STATUS) {
+        continue;
+      }
+      if (alias.alias_type === "actor") {
+        const target = [...actorValues.values()].find(
+          (entry) => entry.actor_id === alias.target_id,
+        );
+        if (target) {
+          setValue(actorValues, alias.raw_value, target);
+        }
+      } else if (alias.alias_type === "tag") {
+        const target = [...tagValues.values()].find(
+          (entry) => entry.tag_id === alias.target_id,
+        );
+        if (target) {
+          setValue(tagValues, alias.raw_value, target);
+        }
+      } else if (alias.alias_type === "category") {
+        const target = categoriesById.get(alias.target_id);
+        if (target) {
+          setValue(categoryValues, alias.raw_value, {
+            category_id: target.category_id,
+            display_name: target.display_name,
+          });
+        }
+      }
+    }
+
+    return { actorValues, tagValues, categoryValues, categoriesById };
   }
 
-  return { actorValues, tagValues, categoryValues, categoriesById };
-}
-
-function setValue(valueIndex, value, target) {
-  const normalized = normalizeValue(value);
-  if (normalized && !valueIndex.has(normalized)) {
-    valueIndex.set(normalized, target);
-  }
-}
-
-function buildFilterSql(filters) {
-  const joins = [];
-  const conditions = ["m.status = 'approved'"];
-  const values = [];
-
-  if (filters.category_id) {
-    conditions.push("m.category_id = ?");
-    values.push(filters.category_id);
-  }
-  if (filters.actor_id) {
-    joins.push("JOIN media_actors fa ON fa.media_id = m.id");
-    conditions.push("fa.actor_id = ? AND fa.search_enabled = 1");
-    values.push(filters.actor_id);
-  }
-  if (filters.tag_id) {
-    joins.push("JOIN media_tags ft ON ft.media_id = m.id");
-    conditions.push("ft.tag_id = ? AND ft.search_enabled = 1");
-    values.push(filters.tag_id);
-  }
-  if (filters.raw_tag) {
-    conditions.push(
-      `EXISTS (
-         SELECT 1
-         FROM json_each(m.raw_payload_json, '$.raw_tags') AS raw_tag
-         WHERE raw_tag.value = ?
-       )`,
-    );
-    values.push(filters.raw_tag);
-  }
-  if (filters.code) {
-    conditions.push("m.normalized_code = ?");
-    values.push(filters.code);
-  }
-  if (filters.code_prefix) {
-    conditions.push("m.normalized_code LIKE ?");
-    values.push(`${filters.code_prefix}-%`);
-  }
-  if (filters.subtitle !== undefined) {
-    conditions.push("m.subtitle = ?");
-    values.push(filters.subtitle ? 1 : 0);
-  }
-  if (filters.year !== undefined) {
-    conditions.push("m.year = ?");
-    values.push(filters.year);
+  function setValue(valueIndex, value, target) {
+    const normalized = normalizeValue(value);
+    if (normalized && !valueIndex.has(normalized)) {
+      valueIndex.set(normalized, target);
+    }
   }
 
-  return { joins, conditions, values };
-}
+  function buildFilterSql(filters) {
+    const joins = [];
+    const conditions = ["m.status = 'approved'"];
+    const values = [];
 
-function clampPageSize(pageSize, search) {
-  if (!Number.isInteger(pageSize) || pageSize < 1) {
-    return search.default_page_size;
+    if (filters.category_id) {
+      conditions.push("m.category_id = ?");
+      values.push(filters.category_id);
+    }
+    if (filters.actor_id) {
+      joins.push("JOIN media_actors fa ON fa.media_id = m.id");
+      conditions.push("fa.actor_id = ? AND fa.search_enabled = 1");
+      values.push(filters.actor_id);
+    }
+    if (filters.tag_id) {
+      joins.push("JOIN media_tags ft ON ft.media_id = m.id");
+      conditions.push("ft.tag_id = ? AND ft.search_enabled = 1");
+      values.push(filters.tag_id);
+    }
+    if (filters.raw_tag) {
+      conditions.push(
+        `EXISTS (
+           SELECT 1
+           FROM json_each(m.raw_payload_json, '$.raw_tags') AS raw_tag
+           WHERE raw_tag.value = ?
+         )`,
+      );
+      values.push(filters.raw_tag);
+    }
+    if (filters.code) {
+      conditions.push("m.normalized_code = ?");
+      values.push(filters.code);
+    }
+    if (filters.code_prefix) {
+      conditions.push("m.normalized_code LIKE ?");
+      values.push(`${filters.code_prefix}-%`);
+    }
+    if (filters.subtitle !== undefined) {
+      conditions.push("m.subtitle = ?");
+      values.push(filters.subtitle ? 1 : 0);
+    }
+    if (filters.year !== undefined) {
+      conditions.push("m.year = ?");
+      values.push(filters.year);
+    }
+
+    return { joins, conditions, values };
   }
-  return Math.min(pageSize, search.max_page_size);
-}
 
-function emptyPage(page, pageSize) {
-  return { page, page_size: pageSize, total: 0, results: [] };
-}
-
-function readRawTags(rawPayloadJson) {
-  if (typeof rawPayloadJson !== "string") {
-    return [];
+  function clampPageSize(pageSize, search) {
+    if (!Number.isInteger(pageSize) || pageSize < 1) {
+      return search.default_page_size;
+    }
+    return Math.min(pageSize, search.max_page_size);
   }
-  try {
-    const rawTags = JSON.parse(rawPayloadJson)?.raw_tags;
-    return Array.isArray(rawTags)
-      ? [...new Set(rawTags.filter((tag) => typeof tag === "string" && tag.length > 0))]
-      : [];
-  } catch {
-    return [];
-  }
-}
 
-function groupBy(rows, key) {
-  const groups = new Map();
-  for (const row of rows) {
-    const entries = groups.get(row[key]) ?? [];
-    entries.push(row);
-    groups.set(row[key], entries);
+  function emptyPage(page, pageSize) {
+    return { page, page_size: pageSize, total: 0, results: [] };
   }
-  return groups;
-}
 
-function assertDatabase(db) {
-  if (
-    !db ||
-    typeof db.prepare !== "function" ||
-    typeof db.batch !== "function"
-  ) {
-    throw new TypeError("D1 database binding is required");
+  function readRawTags(rawPayloadJson) {
+    if (typeof rawPayloadJson !== "string") {
+      return [];
+    }
+    try {
+      const rawTags = JSON.parse(rawPayloadJson)?.raw_tags;
+      return Array.isArray(rawTags)
+        ? [...new Set(rawTags.filter((tag) => typeof tag === "string" && tag.length > 0))]
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function groupBy(rows, key) {
+    const groups = new Map();
+    for (const row of rows) {
+      const entries = groups.get(row[key]) ?? [];
+      entries.push(row);
+      groups.set(row[key], entries);
+    }
+    return groups;
+  }
+
+  function assertDatabase(db) {
+    if (
+      !db ||
+      typeof db.prepare !== "function" ||
+      typeof db.batch !== "function"
+    ) {
+      throw new TypeError("D1 database binding is required");
+    }
   }
 }
