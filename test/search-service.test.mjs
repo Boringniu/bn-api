@@ -105,6 +105,29 @@ test("findMedia queries only approved media with clamped paging", async () => {
   assert.ok(!listSql.includes("source_url"));
 });
 
+test("findMedia formats non-empty rows without a missing-index ReferenceError", async () => {
+  const db = new FakeD1();
+  db.batch = async (statements) => {
+    db.statements.push(...statements);
+    if (statements.length === 2 && statements[0].sql.includes("GROUP BY")) {
+      return [
+        { results: [{ id: "media_1", normalized_code: "ABP-123", title: "测试作品", category_id: "cat_japan", subtitle: 1, video_count: 1 }] },
+        { results: [{ total: 1 }] },
+      ];
+    }
+    return [{ results: [] }, { results: [] }, { results: [] }];
+  };
+
+  const result = await service.findMedia(db);
+  assert.equal(result.total, 1);
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0].id, "media_1");
+  assert.deepEqual(result.results[0].category, {
+    category_id: "cat_japan",
+    display_name: "日本",
+  });
+});
+
 test("findMedia groups duplicate videos by normalized code", async () => {
   const db = new FakeD1();
   await service.findMedia(db, { filters: { code: "ADN-100" } });
