@@ -287,7 +287,7 @@ export function createSearchService({
   }
 
   function formatMedia(row, associations) {
-    const category = indexes.categoriesById.get(row.category_id);
+    const category = cachedIndexes?.categoriesById.get(row.category_id) ?? null;
     return {
       id: row.id,
       title: row.title,
