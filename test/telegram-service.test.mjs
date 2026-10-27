@@ -535,6 +535,35 @@ test("private bot searches any native hashtag and returns a fully linked resourc
   assert.equal((resultText.match(/https:\/\/t\.me\/c\/4396154285\/88/gu) ?? []).length, 4);
 });
 
+test("private bot extracts a hashtag from natural search text", async () => {
+  const searchService = createSearchStub({
+    rawTagMedia: [sampleMedia],
+  });
+  const telegramCalls = [];
+  const service = createService({
+    searchService,
+    fetchImpl: async (url, init) => {
+      telegramCalls.push({ url, body: JSON.parse(init.body) });
+      return { json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    },
+  });
+
+  await service.handleUpdate(
+    new FakeD1(),
+    {
+      message: {
+        chat: { id: 111, type: "private" },
+        from: { id: 222 },
+        text: "搜索 #剧情。",
+      },
+    },
+    { TELEGRAM_BOT_TOKEN: "bot-token" },
+  );
+
+  assert.deepEqual(searchService.findCalls[0].filters, { raw_tag: "剧情" });
+  assert.ok(telegramCalls[0].body.text.includes("#剧情"));
+});
+
 test("plain native name takes precedence over a conflicting actor dictionary match", async () => {
   const telegramCalls = [];
   const nativeMedia = {

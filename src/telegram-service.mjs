@@ -2649,11 +2649,18 @@ function formatShanghaiTime(value) {
 
 function parseRawTagQuery(query) {
   const raw = typeof query === "string" ? query.trim() : "";
-  if (!raw.startsWith("#")) {
+  if (!raw) {
     return null;
   }
-  const tag = raw.replace(/^#+/u, "").trim();
-  return tag && !/\s/u.test(tag) ? tag : null;
+  // Accept both a bare hashtag and natural input such as “搜索 #剧情”。
+  // Telegram may also preserve punctuation when a user copies a hashtag
+  // from a message, while stored channel tags already strip that punctuation.
+  const match = raw.match(/(?:^|\s)#+([^\s#]+)/u);
+  if (!match) {
+    return null;
+  }
+  const tag = cleanTopicValue(match[1]).trim();
+  return tag || null;
 }
 
 function parsePlainRawTagQuery(query) {
