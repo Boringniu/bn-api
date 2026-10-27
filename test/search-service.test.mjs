@@ -118,7 +118,16 @@ test("findMedia formats non-empty rows without a missing-index ReferenceError", 
     return [{ results: [] }, { results: [] }, { results: [] }];
   };
 
-  const result = await service.findMedia(db);
+  const coldService = createSearchService({
+    actorDictionaryConfig: requireConfig("actor_dictionary"),
+    aliasConfig: requireConfig("alias"),
+    categoryConfig: requireConfig("category"),
+    ignoredConfig: requireConfig("ignored"),
+    searchConfig: requireConfig("search"),
+    tagDictionaryConfig: requireConfig("tag_dictionary"),
+    versionConfig: requireConfig("version"),
+  });
+  const result = await coldService.findMedia(db);
   assert.equal(result.total, 1);
   assert.equal(result.results.length, 1);
   assert.equal(result.results[0].id, "media_1");
