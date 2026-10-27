@@ -132,7 +132,8 @@ test("findMedia filters an arbitrary native hashtag from the stored caption", as
   await service.findMedia(db, { filters: { raw_tag: "剧情" } });
 
   const listStatement = db.statements[0];
-  assert.match(listStatement.sql, /json_each\(m\.raw_payload_json, '\$\.raw_tags'\)/);
+  assert.match(listStatement.sql, /json_valid\(m\.raw_payload_json\)/);
+  assert.match(listStatement.sql, /json_each\(/);
   assert.ok(listStatement.values.includes("剧情"));
 });
 

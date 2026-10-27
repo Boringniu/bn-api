@@ -583,7 +583,13 @@ export function createSearchService({
       conditions.push(
         `EXISTS (
            SELECT 1
-           FROM json_each(m.raw_payload_json, '$.raw_tags') AS raw_tag
+           FROM json_each(
+             CASE
+               WHEN json_valid(m.raw_payload_json) = 1 THEN m.raw_payload_json
+               ELSE '{}'
+             END,
+             '$.raw_tags'
+           ) AS raw_tag
            WHERE raw_tag.value = ?
          )`,
       );
