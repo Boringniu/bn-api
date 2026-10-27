@@ -81,12 +81,7 @@ export function createSearchService({
       // For now, we'll rebuild cache on every call to keep it simple
       // but in production we'd want to check if configs have changed
 
-      // Rebuild cache if needed
-      if (!cachedIndexes || !cachedIgnoredValues) {
-        const cache = buildCache();
-        cachedIndexes = cache.indexes;
-        cachedIgnoredValues = cache.ignoredValues;
-      }
+      ensureCache();
 
       const indexes = cachedIndexes;
       const ignoredValues = cachedIgnoredValues;
@@ -286,8 +281,17 @@ export function createSearchService({
     return { actors, tags, rawTags };
   }
 
+  function ensureCache() {
+    if (!cachedIndexes || !cachedIgnoredValues) {
+      const cache = buildCache();
+      cachedIndexes = cache.indexes;
+      cachedIgnoredValues = cache.ignoredValues;
+    }
+  }
+
   function formatMedia(row, associations) {
-    const category = cachedIndexes?.categoriesById.get(row.category_id) ?? null;
+    ensureCache();
+    const category = cachedIndexes.categoriesById.get(row.category_id) ?? null;
     return {
       id: row.id,
       title: row.title,
