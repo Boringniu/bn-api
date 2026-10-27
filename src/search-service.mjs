@@ -167,7 +167,24 @@ export function createSearchService({
       );
       const rows = listResult.results ?? [];
       const mediaIds = rows.map((row) => row.id);
-      const associations = await loadAssociations(db, mediaIds);
+      let associations;
+      try {
+        associations = await loadAssociations(db, mediaIds);
+      } catch (error) {
+        // A malformed or partially migrated association row must not make a
+        // valid directory query disappear entirely. The core media row still
+        // contains the code, title and channel mapping needed by the Bot.
+        console.warn("media association loading failed; using empty associations", {
+          media_count: mediaIds.length,
+          message: error?.message ?? "unknown error",
+        });
+        associations = {
+          actors: new Map(),
+          categories: new Map(),
+          tags: new Map(),
+          rawTags: new Map(),
+        };
+      }
 
       return {
         page: currentPage,
