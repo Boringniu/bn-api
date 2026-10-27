@@ -173,6 +173,35 @@ test("strips forwarded source by copying before deleting the original", async ()
   assert.equal(calls[1].payload.message_id, 77);
 });
 
+test("strips forwarded source when Telegram sends legacy forward fields", async () => {
+  const calls = [];
+  const service = createService({
+    fetchImpl: async (url, init) => {
+      const method = url.split("/").at(-1);
+      calls.push({ method, payload: JSON.parse(init.body) });
+      return {
+        json: async () => ({
+          ok: true,
+          result: method === "copyMessage" ? { message_id: 89 } : true,
+        }),
+      };
+    },
+  });
+
+  const copied = await service.stripForwardSource(
+    {
+      message_id: 78,
+      forward_from_chat: { id: -1001234567890, type: "channel" },
+      forward_from_message_id: 456,
+    },
+    "-1004396154285",
+    { TELEGRAM_BOT_TOKEN: "bot-token", TELEGRAM_STRIP_FORWARD_SOURCE: "true" },
+  );
+
+  assert.equal(copied.message_id, 89);
+  assert.deepEqual(calls.map((call) => call.method), ["copyMessage", "deleteMessage"]);
+});
+
 test("strips a forwarded media group in one copy to preserve album layout", async () => {
   const calls = [];
   const service = createService({

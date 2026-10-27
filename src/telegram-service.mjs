@@ -2789,7 +2789,16 @@ function resolveTelegramMedia(post) {
 function shouldStripForwardSource(post, env) {
   return (
     String(env?.TELEGRAM_STRIP_FORWARD_SOURCE ?? "").toLowerCase() === "true" &&
-    Boolean(post?.forward_origin ?? post?.forward_from)
+    hasTelegramForwardSource(post)
+  );
+}
+
+function hasTelegramForwardSource(post) {
+  return Boolean(
+    post?.forward_origin ??
+      post?.forward_from ??
+      post?.forward_from_chat ??
+      post?.is_automatic_forward,
   );
 }
 
@@ -2861,6 +2870,9 @@ function snapshotChannelPost(post) {
     video_note: post.video_note,
     forward_origin: post.forward_origin,
     forward_from: post.forward_from,
+    forward_from_chat: post.forward_from_chat,
+    forward_from_message_id: post.forward_from_message_id,
+    is_automatic_forward: post.is_automatic_forward,
   };
 }
 
@@ -2871,6 +2883,9 @@ function copiedChannelPost(source, messageId) {
     message_id: messageId,
     forward_origin: null,
     forward_from: null,
+    forward_from_chat: null,
+    forward_from_message_id: null,
+    is_automatic_forward: false,
   };
 }
 
